@@ -167,21 +167,6 @@ func TestDetectDoesNotRequireConfig(t *testing.T) {
 	}
 }
 
-func TestParseInput(t *testing.T) {
-	for value, want := range map[string]uint16{"0x0f": 0x0f, "17": 17, " 0X11 ": 0x11} {
-		got, err := parseInput(value)
-		if err != nil {
-			t.Fatalf("parseInput(%q) error = %v", value, err)
-		}
-		if uint16(got) != want {
-			t.Fatalf("parseInput(%q) = %s, want 0x%02x", value, got, want)
-		}
-	}
-	if _, err := parseInput("not-a-number"); err == nil {
-		t.Fatal("parseInput(invalid) error = nil")
-	}
-}
-
 func prepareCLI(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

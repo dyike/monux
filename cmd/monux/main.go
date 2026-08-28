@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -59,7 +58,7 @@ func newServeCommand(configPath *string) *cobra.Command {
 		Short: "Run the monitor control HTTP API",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, switcher, err := loadSwitcher(*configPath)
+			_, backend, switcher, err := loadControl(*configPath)
 			if err != nil {
 				return err
 			}
@@ -73,9 +72,10 @@ func newServeCommand(configPath *string) *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "warning: HTTP API is listening beyond localhost without authentication; set MONUX_HTTP_TOKEN")
 			}
 			server := &http.Server{
-				Handler:           httpapi.New(switcher, token),
+				Handler:           httpapi.New(backend, switcher, token),
 				ReadHeaderTimeout: 5 * time.Second,
 				IdleTimeout:       60 * time.Second,
+				MaxHeaderBytes:    8 * 1024,
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "monux HTTP API listening on http://%s\n", listener.Addr())
 
@@ -182,7 +182,7 @@ func newInputsCommand(configPath *string) *cobra.Command {
 					currentStatus = "yes"
 				}
 				sort.Strings(names[input])
-				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", input, connectorName(input), reportStatus, currentStatus, strings.Join(names[input], ","))
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", input, input.ConnectorName(), reportStatus, currentStatus, strings.Join(names[input], ","))
 			}
 			return writer.Flush()
 		},
@@ -295,7 +295,7 @@ func newSetCommand(configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			input, err := parseInput(args[0])
+			input, err := monitor.ParseInput(args[0])
 			if err != nil {
 				return err
 			}
@@ -313,53 +313,22 @@ func newSetCommand(configPath *string) *cobra.Command {
 }
 
 func loadSwitcher(path string) (config.Config, *service.Switcher, error) {
+	cfg, _, switcher, err := loadControl(path)
+	return cfg, switcher, err
+}
+
+func loadControl(path string) (config.Config, monitor.Backend, *service.Switcher, error) {
 	cfg, err := config.Load(path)
 	if err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, nil, err
 	}
 	controller, err := newBackend(cfg)
 	if err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, nil, err
 	}
-	return cfg, service.NewSwitcher(controller, cfg.Inputs), nil
+	return cfg, controller, service.NewSwitcher(controller, cfg.Inputs), nil
 }
 
 func newBackend(cfg config.Config) (monitor.Backend, error) {
 	return newNativeBackend(cfg.Monitor.ID)
-}
-
-func parseInput(value string) (monitor.Input, error) {
-	parsed, err := strconv.ParseUint(strings.TrimSpace(value), 0, 16)
-	if err != nil {
-		return 0, fmt.Errorf("invalid input value %q: use decimal or 0x-prefixed hexadecimal", value)
-	}
-	return monitor.Input(parsed), nil
-}
-
-func connectorName(input monitor.Input) string {
-	names := map[monitor.Input]string{
-		0x01: "VGA 1",
-		0x02: "VGA 2",
-		0x03: "DVI 1",
-		0x04: "DVI 2",
-		0x05: "Composite 1",
-		0x06: "Composite 2",
-		0x07: "S-Video 1",
-		0x08: "S-Video 2",
-		0x09: "Tuner 1",
-		0x0a: "Tuner 2",
-		0x0b: "Tuner 3",
-		0x0c: "Component 1",
-		0x0d: "Component 2",
-		0x0e: "Component 3",
-		0x0f: "DisplayPort 1",
-		0x10: "DisplayPort 2",
-		0x11: "HDMI 1",
-		0x12: "HDMI 2",
-		0x1b: "USB-C",
-	}
-	if name, ok := names[input]; ok {
-		return name
-	}
-	return "Unknown"
 }

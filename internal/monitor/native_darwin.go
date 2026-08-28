@@ -146,7 +146,7 @@ func (b *NativeBackend) SupportedInputs() ([]Input, error) {
 	}
 	defer C.CFRelease(service)
 
-	capabilities, err := ddc.ReadCapabilities(func(offset uint16) ([]byte, error) {
+	readFragment := func(offset uint16) ([]byte, error) {
 		var lastErr error
 		for attempt := 1; attempt <= 3; attempt++ {
 			request := ddc.CapabilitiesRequest(offset)
@@ -177,9 +177,17 @@ func (b *NativeBackend) SupportedInputs() ([]Input, error) {
 			b.sleep(100 * time.Millisecond)
 		}
 		return nil, fmt.Errorf("capabilities offset %d failed after 3 attempts: %w", offset, lastErr)
-	})
+	}
+	var capabilities string
+	for attempt := 1; attempt <= 2; attempt++ {
+		capabilities, err = ddc.ReadCapabilities(readFragment)
+		if err == nil {
+			break
+		}
+		b.sleep(500 * time.Millisecond)
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read complete monitor capabilities after 2 attempts: %w", err)
 	}
 	inputs, err := inputsFromCapabilities(capabilities)
 	if err != nil {

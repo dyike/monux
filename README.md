@@ -190,13 +190,15 @@ It listens on `127.0.0.1:8765` by default. Query it locally with:
 curl http://127.0.0.1:8765/healthz
 curl http://127.0.0.1:8765/api/v1/status
 curl http://127.0.0.1:8765/api/v1/inputs
+curl http://127.0.0.1:8765/api/v1/capabilities
 curl -X POST http://127.0.0.1:8765/api/v1/switch/linux
+curl -X POST http://127.0.0.1:8765/api/v1/set/0x0f
 ```
 
 Example status response:
 
 ```json
-{"name":"mac","input":"0x11","value":17}
+{"name":"mac","input":"0x11","value":17,"connector":"HDMI 1"}
 ```
 
 For access from an ESP32 or another machine, bind to the LAN and set a token:
@@ -217,10 +219,19 @@ curl -X POST \
   http://linux-ip:8765/api/v1/switch/mac
 ```
 
+The token is not encrypted by plain HTTP. Use it only on a trusted LAN, or put
+the loopback-only server behind a TLS reverse proxy on an untrusted network.
+
 `GET /healthz` remains unauthenticated so a supervisor can check process
 health. DDC operations from concurrent HTTP requests are serialized. The
 server handles `SIGINT` and `SIGTERM` with a graceful shutdown; use systemd,
 launchd, or another platform supervisor when it should run as a daemon.
+
+`GET /api/v1/inputs` is a fast list of configured names. The slower
+`GET /api/v1/capabilities` performs native DDC/CI discovery and merges the
+monitor-reported values, current input, connector labels, and configured
+names. `POST /api/v1/set/{value}` exposes the CLI's raw `set` operation and
+should be reserved for diagnostics; normal clients should switch by name.
 
 Environment variables:
 
