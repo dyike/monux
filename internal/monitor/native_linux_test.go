@@ -35,6 +35,32 @@ func TestDiscoverLinuxDisplays(t *testing.T) {
 	}
 }
 
+func TestDiscoverLinuxDisplaysPrefersDisplayPortAUXBus(t *testing.T) {
+	root := t.TempDir()
+	drmRoot := filepath.Join(root, "drm")
+	i2cRoot := filepath.Join(root, "i2c-dev")
+	connector := filepath.Join(drmRoot, "card0-DP-1")
+	for _, path := range []string{
+		filepath.Join(connector, "i2c-23", "i2c-dev", "i2c-23"),
+		filepath.Join(connector, "ddc", "i2c-dev", "i2c-17"),
+	} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(connector, "status"), []byte("connected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	displays, err := discoverLinuxDisplays(drmRoot, i2cRoot)
+	if err != nil {
+		t.Fatalf("discoverLinuxDisplays() error = %v", err)
+	}
+	if len(displays) != 1 || displays[0].ID != "23" || displays[0].Name != "card0-DP-1" {
+		t.Fatalf("discoverLinuxDisplays() = %#v", displays)
+	}
+}
+
 func TestDiscoverLinuxDisplaysFallback(t *testing.T) {
 	root := t.TempDir()
 	i2cRoot := filepath.Join(root, "i2c-dev")

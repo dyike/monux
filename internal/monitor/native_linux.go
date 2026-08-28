@@ -178,20 +178,19 @@ func (b *NativeBackend) openBus() (*os.File, error) {
 }
 
 func discoverLinuxDisplays(drmRoot, i2cRoot string) ([]Display, error) {
-	paths, err := filepath.Glob(filepath.Join(drmRoot, "card*-*", "ddc", "i2c-dev", "i2c-*"))
+	connectors, err := filepath.Glob(filepath.Join(drmRoot, "card*-*"))
 	if err != nil {
 		return nil, err
 	}
-	displays := make([]Display, 0, len(paths))
+	displays := make([]Display, 0, len(connectors))
 	seen := make(map[string]bool)
-	for _, path := range paths {
-		connectorDir := filepath.Dir(filepath.Dir(filepath.Dir(path)))
+	for _, connectorDir := range connectors {
 		status, err := os.ReadFile(filepath.Join(connectorDir, "status"))
 		if err == nil && strings.TrimSpace(string(status)) != "connected" {
 			continue
 		}
-		id := strings.TrimPrefix(filepath.Base(path), "i2c-")
-		if _, err := strconv.Atoi(id); err != nil || seen[id] {
+		id, ok := linuxI2CBusForConnector(connectorDir)
+		if !ok || seen[id] {
 			continue
 		}
 		seen[id] = true
@@ -222,6 +221,32 @@ func discoverLinuxDisplays(drmRoot, i2cRoot string) ([]Display, error) {
 		return left < right
 	})
 	return displays, nil
+}
+
+func linuxI2CBusForConnector(connectorDir string) (string, bool) {
+	// DisplayPort exposes its working DDC/CI transport as an I2C-over-AUX
+	// adapter directly below the connector. Some drivers also publish a ddc
+	// symlink to the matching hardware I2C bus, but that adapter can read EDID
+	// while rejecting DDC/CI writes. Prefer the connector-owned AUX adapter and
+	// retain the ddc path as the fallback used by HDMI and older drivers.
+	patterns := []string{
+		filepath.Join(connectorDir, "i2c-*", "i2c-dev", "i2c-*"),
+		filepath.Join(connectorDir, "ddc", "i2c-dev", "i2c-*"),
+	}
+	for _, pattern := range patterns {
+		paths, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			id := strings.TrimPrefix(filepath.Base(path), "i2c-")
+			if _, err := strconv.Atoi(id); err == nil {
+				return id, true
+			}
+		}
+	}
+	return "", false
 }
 
 func monitorNameFromEDID(edid []byte) string {
