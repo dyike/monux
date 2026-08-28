@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dyike/monux/internal/config"
 	"github.com/dyike/monux/internal/monitor"
 )
 
@@ -109,6 +110,125 @@ func TestInputsCommandRequiresSelectionForMultipleDetectedMonitors(t *testing.T)
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "2 monitors were detected") {
 		t.Fatalf("Execute() error = %v, want multiple-monitor selection error", err)
+	}
+}
+
+func TestInitCommandCreatesDetectedConfig(t *testing.T) {
+	backend := useFakeBackend(t)
+	backend.displays = []monitor.Display{{ID: "23", Name: "card2-DP-12 (DELL P2415Q)"}}
+	backend.current = 0x0f
+	backend.supported = []monitor.Input{0x11, 0x10, 0x0f}
+	configPath := filepath.Join(t.TempDir(), "monux", "config.yaml")
+
+	cmd := newRootCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"--config", configPath, "init"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Monitor.ID != "23" {
+		t.Fatalf("monitor ID = %q, want 23", cfg.Monitor.ID)
+	}
+	if cfg.Inputs[defaultLocalInputName()] != 0x0f || cfg.Inputs["displayport-2"] != 0x10 || cfg.Inputs["hdmi-1"] != 0x11 {
+		t.Fatalf("generated inputs = %#v", cfg.Inputs)
+	}
+	for _, want := range []string{"created " + configPath, "monitor: 23", "input: " + defaultLocalInputName() + "=0x0f", "(current)", "not the operating system"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output does not contain %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestInitCommandRefreshesMonitorAndPreservesNames(t *testing.T) {
+	configPath := prepareCLI(t)
+	backend := useFakeBackend(t)
+	backend.displays = []monitor.Display{{ID: "23", Name: "Dell P2415Q"}}
+	backend.current = 0x11
+	backend.supported = []monitor.Input{0x0f, 0x10, 0x11}
+
+	cmd := newRootCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"--config", configPath, "init"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Monitor.ID != "23" || cfg.Inputs["linux"] != 0x0f || cfg.Inputs["mac"] != 0x11 {
+		t.Fatalf("refreshed config = %#v", cfg)
+	}
+	if cfg.Inputs["displayport-2"] != 0x10 {
+		t.Fatalf("missing discovered input: %#v", cfg.Inputs)
+	}
+	if !strings.Contains(output.String(), "updated "+configPath) {
+		t.Fatalf("output = %s", output.String())
+	}
+}
+
+func TestInitCommandAcceptsNamedInputOverrides(t *testing.T) {
+	backend := useFakeBackend(t)
+	backend.displays = []monitor.Display{{ID: "1", Name: "Dell P2415Q"}}
+	backend.current = 0x11
+	backend.supported = []monitor.Input{0x0f, 0x11}
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cmd := newRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--config", configPath, "init", "--input", "mac=0x11", "--input", "linux=0x0f"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Inputs) != 2 || cfg.Inputs["mac"] != 0x11 || cfg.Inputs["linux"] != 0x0f {
+		t.Fatalf("generated inputs = %#v", cfg.Inputs)
+	}
+}
+
+func TestInitCommandRequiresMonitorSelection(t *testing.T) {
+	backend := useFakeBackend(t)
+	backend.displays = []monitor.Display{{ID: "15", Name: "First"}, {ID: "23", Name: "Second"}}
+	backend.current = 0x0f
+	backend.supported = []monitor.Input{0x0f}
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	cmd := newRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--config", configPath, "init"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--monitor <id>") {
+		t.Fatalf("Execute() error = %v, want monitor selection error", err)
+	}
+
+	cmd = newRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--config", configPath, "init", "--monitor", "23"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() selected monitor error = %v", err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Monitor.ID != "23" {
+		t.Fatalf("monitor ID = %q, want 23", cfg.Monitor.ID)
 	}
 }
 

@@ -99,11 +99,39 @@ The default per-user configuration path is:
 - macOS: `~/Library/Application Support/monux/config.yaml`
 - Windows: `%AppData%\monux\config.yaml`
 
-Copy and edit `config.example.yaml`:
+Generate the configuration on each computer while the monitor is showing that
+computer:
+
+```bash
+monux init
+```
+
+`init` detects the monitor's platform-local ID, reads its current VCP input and
+capabilities, creates the parent directory, and writes the configuration. It is
+safe to rerun: existing input names are preserved, while a changed Linux I2C
+bus or other platform-local monitor ID is refreshed automatically.
+
+The current input is named `linux`, `mac`, or `windows` according to the local
+platform. Other discovered values are given connector names such as
+`displayport-2` and `hdmi-1`. A monitor cannot identify which operating system
+is connected to a port, so supply known remote names during initialization:
+
+```bash
+monux init --input mac=0x11 --input linux=0x0f
+```
+
+Repeat `--input name=value` as needed. With multiple detected monitors, select
+one explicitly:
+
+```bash
+monux init --monitor 23
+```
+
+The resulting file looks like:
 
 ```yaml
 monitor:
-  id: "15"
+  id: "23"
 
 inputs:
   mac: 0x11
@@ -111,9 +139,9 @@ inputs:
   windows: 0x10
 ```
 
-`monitor.id` is local to the operating system, so it may be `15` on Linux and
+`monitor.id` is local to the operating system, so it may be `23` on Linux and
 `1` on macOS or Windows. The named `inputs` section can otherwise be identical
-on every machine.
+on every machine. Manual editing remains supported.
 
 Override the default path with `--config`/`-c` or `MONUX_CONFIG`.
 
@@ -154,6 +182,7 @@ detected.
 
 ```bash
 monux detect
+monux init
 monux inputs
 monux status
 monux switch mac
@@ -231,6 +260,18 @@ the loopback-only server behind a TLS reverse proxy on an untrusted network.
 health. DDC operations from concurrent HTTP requests are serialized. The
 server handles `SIGINT` and `SIGTERM` with a graceful shutdown; use systemd,
 launchd, or another platform supervisor when it should run as a daemon.
+
+After switching from Linux to Mac, the most reliable way to switch back is to
+call the server running on the currently displayed Mac:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/switch/linux
+```
+
+For an ESP32, use the Mac's LAN address and Bearer token instead. Run `monux`
+on both computers: Linux handles the request while Linux is displayed, and Mac
+handles it while Mac is displayed. Some monitors accept DDC commands over an
+inactive input, but clients must not depend on that hardware-specific behavior.
 
 `GET /api/v1/inputs` is a fast list of configured names. The slower
 `GET /api/v1/capabilities` performs native DDC/CI discovery and merges the

@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"github.com/dyike/monux/internal/config"
 	"github.com/dyike/monux/internal/httpapi"
@@ -40,6 +42,7 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVarP(&configPath, "config", "c", configPath, "configuration file")
 
 	root.AddCommand(
+		newInitCommand(&configPath),
 		newDetectCommand(),
 		newInputsCommand(&configPath),
 		newStatusCommand(&configPath),
@@ -48,6 +51,209 @@ func newRootCommand() *cobra.Command {
 		newServeCommand(&configPath),
 	)
 	return root
+}
+
+func newInitCommand(configPath *string) *cobra.Command {
+	var monitorID string
+	currentName := defaultLocalInputName()
+	var configuredInputs []string
+	command := &cobra.Command{
+		Use:   "init",
+		Short: "Detect the monitor and generate or refresh the configuration",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg := config.Config{Inputs: make(map[string]monitor.Input)}
+			existed := false
+			loaded, err := config.Load(*configPath)
+			switch {
+			case err == nil:
+				cfg = loaded
+				existed = true
+			case errors.Is(err, os.ErrNotExist):
+			case err != nil:
+				return err
+			}
+
+			detector, err := newNativeBackend("")
+			if err != nil {
+				return err
+			}
+			displays, err := detector.Detect()
+			if err != nil {
+				return fmt.Errorf("detect monitors: %w", err)
+			}
+			display, err := selectDisplay(displays, monitorID, cfg.Monitor.ID)
+			if err != nil {
+				return err
+			}
+
+			backend, err := newNativeBackend(display.ID)
+			if err != nil {
+				return err
+			}
+			supported, supportedErr := backend.SupportedInputs()
+			current, currentErr := backend.CurrentInput()
+
+			for _, mapping := range configuredInputs {
+				name, input, err := parseConfiguredInput(mapping)
+				if err != nil {
+					return err
+				}
+				cfg.Inputs[name] = input
+			}
+			if currentErr == nil && !hasInputValue(cfg.Inputs, current) {
+				name := uniqueInputName(currentName, cfg.Inputs)
+				cfg.Inputs[name] = current
+			}
+			sort.Slice(supported, func(i, j int) bool { return supported[i] < supported[j] })
+			for _, input := range supported {
+				if hasInputValue(cfg.Inputs, input) {
+					continue
+				}
+				name := uniqueInputName(inputName(input), cfg.Inputs)
+				cfg.Inputs[name] = input
+			}
+			if len(cfg.Inputs) == 0 {
+				return fmt.Errorf("monitor %s did not provide a current or supported input: current: %v; capabilities: %v", display.ID, currentErr, supportedErr)
+			}
+
+			cfg.Monitor.ID = display.ID
+			if err := config.Save(*configPath, cfg); err != nil {
+				return err
+			}
+			if supportedErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not read monitor input capabilities: %v\n", supportedErr)
+			}
+			if currentErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not read current monitor input: %v\n", currentErr)
+			}
+
+			action := "created"
+			if existed {
+				action = "updated"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", action, *configPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "monitor: %s (%s)\n", display.ID, display.Name)
+			printConfiguredInputs(cmd, cfg.Inputs, current, currentErr)
+			fmt.Fprintln(cmd.OutOrStdout(), "note: a monitor reports connector values, not the operating system connected to each port")
+			return nil
+		},
+	}
+	command.Flags().StringVar(&monitorID, "monitor", "", "monitor ID to use when more than one is detected")
+	command.Flags().StringVar(&currentName, "current-name", currentName, "name assigned to the current input when it is not configured")
+	command.Flags().StringArrayVar(&configuredInputs, "input", nil, "named input mapping in name=value form (repeatable)")
+	return command
+}
+
+func defaultLocalInputName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "mac"
+	case "windows":
+		return "windows"
+	default:
+		return runtime.GOOS
+	}
+}
+
+func selectDisplay(displays []monitor.Display, requested, configured string) (monitor.Display, error) {
+	if len(displays) == 0 {
+		return monitor.Display{}, errors.New("no monitor was detected")
+	}
+	selectedID := strings.TrimSpace(requested)
+	if selectedID == "" && len(displays) == 1 {
+		return displays[0], nil
+	}
+	if selectedID == "" {
+		selectedID = configured
+	}
+	for _, display := range displays {
+		if display.ID == selectedID {
+			return display, nil
+		}
+	}
+	available := make([]string, 0, len(displays))
+	for _, display := range displays {
+		available = append(available, fmt.Sprintf("%s (%s)", display.ID, display.Name))
+	}
+	if selectedID != "" {
+		return monitor.Display{}, fmt.Errorf("monitor %q was not detected; available: %s", selectedID, strings.Join(available, ", "))
+	}
+	return monitor.Display{}, fmt.Errorf("%d monitors were detected; rerun with --monitor <id>; available: %s", len(displays), strings.Join(available, ", "))
+}
+
+func parseConfiguredInput(mapping string) (string, monitor.Input, error) {
+	name, value, found := strings.Cut(mapping, "=")
+	name = strings.TrimSpace(name)
+	if !found || name == "" || strings.TrimSpace(value) == "" {
+		return "", 0, fmt.Errorf("invalid --input %q: use name=value (for example mac=0x11)", mapping)
+	}
+	input, err := monitor.ParseInput(value)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid --input %q: %w", mapping, err)
+	}
+	return name, input, nil
+}
+
+func hasInputValue(inputs map[string]monitor.Input, wanted monitor.Input) bool {
+	for _, input := range inputs {
+		if input == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueInputName(base string, inputs map[string]monitor.Input) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "input"
+	}
+	if _, exists := inputs[base]; !exists {
+		return base
+	}
+	for suffix := 2; ; suffix++ {
+		candidate := fmt.Sprintf("%s-%d", base, suffix)
+		if _, exists := inputs[candidate]; !exists {
+			return candidate
+		}
+	}
+}
+
+func inputName(input monitor.Input) string {
+	name := strings.ToLower(input.ConnectorName())
+	var result strings.Builder
+	separator := false
+	for _, character := range name {
+		if unicode.IsLetter(character) || unicode.IsDigit(character) {
+			if separator && result.Len() > 0 {
+				result.WriteByte('-')
+			}
+			result.WriteRune(character)
+			separator = false
+		} else {
+			separator = true
+		}
+	}
+	if result.Len() == 0 || name == "unknown" {
+		return "input-" + input.String()
+	}
+	return result.String()
+}
+
+func printConfiguredInputs(cmd *cobra.Command, inputs map[string]monitor.Input, current monitor.Input, currentErr error) {
+	names := make([]string, 0, len(inputs))
+	for name := range inputs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		marker := ""
+		if currentErr == nil && inputs[name] == current {
+			marker = " (current)"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "input: %s=%s (%s)%s\n", name, inputs[name], inputs[name].ConnectorName(), marker)
+	}
 }
 
 func newServeCommand(configPath *string) *cobra.Command {

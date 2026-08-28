@@ -19,6 +19,18 @@ if [[ ! -f "$shell_config" ]]; then
   exit 1
 fi
 
+if ! command -v "$monux_executable" >/dev/null 2>&1; then
+  echo "monux Omarchy installer: executable not found: $monux_executable" >&2
+  echo "Build and install the monux CLI before installing the widget." >&2
+  exit 1
+fi
+
+if [[ -n "$monux_config" ]]; then
+  "$monux_executable" --config "$monux_config" init
+else
+  "$monux_executable" init
+fi
+
 omarchy plugin validate "$source_dir"
 
 mkdir -p "$plugin_dir"

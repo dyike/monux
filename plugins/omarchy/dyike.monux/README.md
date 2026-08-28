@@ -30,6 +30,17 @@ Install from the repository root:
 ./plugins/omarchy/install.sh
 ```
 
+The installer runs `monux init` before installing the widget. This creates the
+default configuration automatically, or refreshes a changed platform-local
+monitor ID while preserving existing input names. On first use, keep the
+monitor on this Linux machine so the current input is named `linux`. A monitor
+cannot identify the operating system attached to an inactive port; add known
+remote mappings first when their standard connector names are not sufficient:
+
+```bash
+monux init --input linux=0x0f --input mac=0x11 --input windows=0x10
+```
+
 For a repository build or another non-PATH installation, pass explicit paths
 on the first install:
 
