@@ -11,6 +11,7 @@ monux_executable="${MONUX_EXECUTABLE:-monux}"
 monux_config="${MONUX_CONFIG:-}"
 primary_input="${MONUX_PRIMARY_INPUT:-linux}"
 secondary_input="${MONUX_SECONDARY_INPUT:-mac}"
+tertiary_input="${MONUX_TERTIARY_INPUT:-windows}"
 
 if [[ ! -f "$shell_config" ]]; then
   echo "monux Omarchy installer: missing $shell_config" >&2
@@ -34,24 +35,32 @@ jq \
   --arg executable "$monux_executable" \
   --arg configPath "$monux_config" \
   --arg primaryInput "$primary_input" \
-  --arg secondaryInput "$secondary_input" '
-  def insert_before($items; $entry; $before):
-    if any($items[]?; .id == $entry.id) then
-      $items
+  --arg secondaryInput "$secondary_input" \
+  --arg tertiaryInput "$tertiary_input" '
+  def upsert_before($items; $entry; $before):
+    ($items | map(
+      if .id == $entry.id and (has("tertiaryInput") | not)
+      then . + {"tertiaryInput":$entry.tertiaryInput}
+      else .
+      end
+    )) as $updated
+    | if any($updated[]?; .id == $entry.id) then
+      $updated
     else
-      ($items | map(.id) | index($before)) as $index
-      | if $index == null then $items + [$entry]
-        else $items[0:$index] + [$entry] + $items[$index:]
+      ($updated | map(.id) | index($before)) as $index
+      | if $index == null then $updated + [$entry]
+        else $updated[0:$index] + [$entry] + $updated[$index:]
         end
     end;
-  .bar.layout.right = insert_before(
+  .bar.layout.right = upsert_before(
     (.bar.layout.right // []);
     {
       "id":"dyike.monux",
       "executable":$executable,
       "configPath":$configPath,
       "primaryInput":$primaryInput,
-      "secondaryInput":$secondaryInput
+      "secondaryInput":$secondaryInput,
+      "tertiaryInput":$tertiaryInput
     };
     "omarchy.monitor"
   )

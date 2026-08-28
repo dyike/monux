@@ -8,7 +8,7 @@ Interactions:
 
 - Left click: open or close the control panel.
 - Right click: refresh the current input immediately.
-- Inputs tab: view the current name/value and switch between the two configured
+- Inputs tab: view the current name/value and switch between the three configured
   computer inputs.
 - Info tab: inspect the DDC transport, CLI/config paths, and refresh interval.
 - Keyboard: `h/l` navigates tabs or choices, `j/k` changes section, Enter
@@ -39,9 +39,10 @@ MONUX_CONFIG="$HOME/.config/monux/config.yaml" \
 ./plugins/omarchy/install.sh
 ```
 
-The optional `MONUX_PRIMARY_INPUT` and `MONUX_SECONDARY_INPUT` installer
-variables default to `linux` and `mac`. These variables only initialize a new
-bar entry; subsequent reruns preserve the existing widget settings.
+The optional `MONUX_PRIMARY_INPUT`, `MONUX_SECONDARY_INPUT`, and
+`MONUX_TERTIARY_INPUT` installer variables default to `linux`, `mac`, and
+`windows`. These variables initialize a new bar entry. For an existing entry,
+the installer preserves its settings and only adds a missing tertiary input.
 
 The installer copies this directory to
 `~/.config/omarchy/plugins/dyike.monux/`, validates it with Omarchy, and adds
@@ -58,6 +59,7 @@ Configure plugin settings in `~/.config/omarchy/shell.json`, for example:
   "configPath": "/home/me/.config/monux/config.yaml",
   "primaryInput": "linux",
   "secondaryInput": "mac",
+  "tertiaryInput": "windows",
   "refreshIntervalSec": 10,
   "showLabel": true
 }

@@ -27,6 +27,7 @@ Panel {
   readonly property string configPath: String(root.setting("configPath", "")).trim()
   readonly property string primaryInput: String(root.setting("primaryInput", "linux")).trim()
   readonly property string secondaryInput: String(root.setting("secondaryInput", "mac")).trim()
+  readonly property string tertiaryInput: String(root.setting("tertiaryInput", "windows")).trim()
   readonly property int refreshIntervalSec: boundedInteger(root.setting("refreshIntervalSec", 10), 10, 5, 3600)
   readonly property bool busy: statusProcess.running || switchProcess.running
   readonly property var tabs: [
@@ -57,11 +58,19 @@ Panel {
     return "\uf0ec"
   }
 
+  function appendInputOption(options, name) {
+    var value = String(name || "").trim()
+    if (value === "") return
+    for (var i = 0; i < options.length; i++)
+      if (String(options[i].value) === value) return
+    options.push({ value: value, label: titleCase(value), icon: inputIcon(value) })
+  }
+
   function buildInputOptions() {
     var options = []
-    if (primaryInput !== "") options.push({ value: primaryInput, label: titleCase(primaryInput), icon: inputIcon(primaryInput) })
-    if (secondaryInput !== "" && secondaryInput !== primaryInput)
-      options.push({ value: secondaryInput, label: titleCase(secondaryInput), icon: inputIcon(secondaryInput) })
+    appendInputOption(options, primaryInput)
+    appendInputOption(options, secondaryInput)
+    appendInputOption(options, tertiaryInput)
     return options
   }
 
@@ -121,7 +130,7 @@ Panel {
     var target = String(name || "").trim()
     if (busy || executable === "") return
     if (target === "") {
-      lastError = "Configure both Monux input names"
+      lastError = "Configure at least one Monux input name"
       return
     }
     pendingName = target
