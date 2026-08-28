@@ -14,3 +14,14 @@ type Controller interface {
 	CurrentInput() (Input, error)
 	SetInput(input Input) error
 }
+
+type Display struct {
+	ID   string
+	Name string
+}
+
+// Backend is a local, platform-native Controller that can discover displays.
+type Backend interface {
+	Controller
+	Detect() ([]Display, error)
+}

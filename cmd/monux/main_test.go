@@ -4,12 +4,27 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/dyike/monux/internal/monitor"
 )
 
+type fakeBackend struct {
+	current  monitor.Input
+	displays []monitor.Display
+}
+
+func (f *fakeBackend) CurrentInput() (monitor.Input, error) { return f.current, nil }
+func (f *fakeBackend) SetInput(input monitor.Input) error {
+	f.current = input
+	return nil
+}
+func (f *fakeBackend) Detect() ([]monitor.Display, error) { return f.displays, nil }
+
 func TestStatusCommand(t *testing.T) {
-	configPath, logPath := prepareCLI(t)
+	configPath := prepareCLI(t)
+	backend := useFakeBackend(t)
+	backend.current = 0x0f
 
 	cmd := newRootCommand()
 	var output bytes.Buffer
@@ -22,11 +37,11 @@ func TestStatusCommand(t *testing.T) {
 	if got, want := output.String(), "linux (0x0f)\n"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
-	assertCommandLog(t, logPath, "--bus 15 getvcp 60 --terse")
 }
 
 func TestSwitchCommand(t *testing.T) {
-	configPath, logPath := prepareCLI(t)
+	configPath := prepareCLI(t)
+	backend := useFakeBackend(t)
 
 	cmd := newRootCommand()
 	var output bytes.Buffer
@@ -36,14 +51,17 @@ func TestSwitchCommand(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
 	}
-	if got, want := output.String(), "switched to mac (0x11) on bus 15\n"; got != want {
+	if got, want := output.String(), "switched to mac (0x11)\n"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
-	assertCommandLog(t, logPath, "--bus 15 setvcp 60 0x11")
+	if backend.current != 0x11 {
+		t.Fatalf("backend current = %s, want 0x11", backend.current)
+	}
 }
 
 func TestDetectDoesNotRequireConfig(t *testing.T) {
-	_, logPath := prepareCLI(t)
+	backend := useFakeBackend(t)
+	backend.displays = []monitor.Display{{ID: "15", Name: "DP-1 (Dell P2415Q)"}}
 
 	cmd := newRootCommand()
 	var output bytes.Buffer
@@ -53,10 +71,9 @@ func TestDetectDoesNotRequireConfig(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "Display 1") {
-		t.Fatalf("output = %q, want detected display", output.String())
+	if got, want := output.String(), "15\tDP-1 (Dell P2415Q)\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
 	}
-	assertCommandLog(t, logPath, "detect --brief")
 }
 
 func TestParseInput(t *testing.T) {
@@ -74,39 +91,21 @@ func TestParseInput(t *testing.T) {
 	}
 }
 
-func prepareCLI(t *testing.T) (configPath, logPath string) {
+func prepareCLI(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	configPath = filepath.Join(dir, "config.yaml")
-	logPath = filepath.Join(dir, "ddcutil.log")
-	configData := []byte("monitor:\n  bus: 15\ninputs:\n  mac: 0x11\n  linux: 0x0f\n")
-	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("monitor:\n  id: 15\ninputs:\n  mac: 0x11\n  linux: 0x0f\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	fakePath := filepath.Join(dir, "ddcutil")
-	fake := []byte(`#!/bin/sh
-printf '%s\n' "$*" > "$DDCUTIL_TEST_LOG"
-case "$*" in
-  *detect*) printf 'Display 1\n   I2C bus: /dev/i2c-15\n' ;;
-  *getvcp*) printf 'VCP 60 SNC x0f\n' ;;
-esac
-`)
-	if err := os.WriteFile(fakePath, fake, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("DDCUTIL_TEST_LOG", logPath)
-	return configPath, logPath
+	return path
 }
 
-func assertCommandLog(t *testing.T, path, want string) {
+func useFakeBackend(t *testing.T) *fakeBackend {
 	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(string(data)); got != want {
-		t.Fatalf("ddcutil args = %q, want %q", got, want)
-	}
+	backend := &fakeBackend{}
+	oldFactory := newNativeBackend
+	newNativeBackend = func(string) (monitor.Backend, error) { return backend, nil }
+	t.Cleanup(func() { newNativeBackend = oldFactory })
+	return backend
 }

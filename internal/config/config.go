@@ -11,7 +11,7 @@ import (
 )
 
 type MonitorConfig struct {
-	Bus int `yaml:"bus"`
+	ID string `yaml:"id"`
 }
 
 type Config struct {
@@ -36,9 +36,6 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if c.Monitor.Bus <= 0 {
-		return errors.New("monitor.bus must be greater than zero")
-	}
 	if len(c.Inputs) == 0 {
 		return errors.New("inputs must contain at least one named input")
 	}

@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var newNativeBackend = monitor.NewNativeBackend
+
 func main() {
 	if err := newRootCommand().Execute(); err != nil {
 		os.Exit(1)
@@ -43,12 +45,16 @@ func newDetectCommand() *cobra.Command {
 		Short: "Detect DDC/CI-capable monitors",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			output, err := monitor.NewDDCUtil(0).Detect()
+			backend, err := newNativeBackend("")
 			if err != nil {
 				return err
 			}
-			if output != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), output)
+			displays, err := backend.Detect()
+			if err != nil {
+				return err
+			}
+			for _, display := range displays {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", display.ID, display.Name)
 			}
 			return nil
 		},
@@ -92,7 +98,7 @@ func newSwitchCommand(configPath *string) *cobra.Command {
 			if err := switcher.Switch(args[0]); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "switched to %s (%s) on bus %d\n", args[0], cfg.Inputs[args[0]], cfg.Monitor.Bus)
+			fmt.Fprintf(cmd.OutOrStdout(), "switched to %s (%s)\n", args[0], cfg.Inputs[args[0]])
 			return nil
 		},
 	}
@@ -104,7 +110,7 @@ func newSetCommand(configPath *string) *cobra.Command {
 		Short: "Set a raw VCP input value (for example 0x0f)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _, err := loadSwitcher(*configPath)
+			cfg, err := config.Load(*configPath)
 			if err != nil {
 				return err
 			}
@@ -112,10 +118,14 @@ func newSetCommand(configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := monitor.NewDDCUtil(cfg.Monitor.Bus).SetInput(input); err != nil {
+			backend, err := newBackend(cfg)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "set input to %s on bus %d\n", input, cfg.Monitor.Bus)
+			if err := backend.SetInput(input); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "set input to %s\n", input)
 			return nil
 		},
 	}
@@ -126,8 +136,15 @@ func loadSwitcher(path string) (config.Config, *service.Switcher, error) {
 	if err != nil {
 		return config.Config{}, nil, err
 	}
-	controller := monitor.NewDDCUtil(cfg.Monitor.Bus)
+	controller, err := newBackend(cfg)
+	if err != nil {
+		return config.Config{}, nil, err
+	}
 	return cfg, service.NewSwitcher(controller, cfg.Inputs), nil
+}
+
+func newBackend(cfg config.Config) (monitor.Backend, error) {
+	return newNativeBackend(cfg.Monitor.ID)
 }
 
 func parseInput(value string) (monitor.Input, error) {

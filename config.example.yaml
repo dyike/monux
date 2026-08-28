@@ -1,9 +1,11 @@
 monitor:
-  # Find this number with: monux detect
-  bus: 15
+  # Platform-local identifier reported by: monux detect
+  # Linux uses an I2C bus number; macOS and Windows use a display number.
+  id: "15"
 
 inputs:
   # Labels identify the computers connected to these monitor inputs.
   # These are common Dell P2415Q values; confirm them for your cabling/display.
   mac: 0x11
   linux: 0x0f
+  windows: 0x12
