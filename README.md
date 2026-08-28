@@ -117,7 +117,7 @@ platform. Other discovered values are given connector names such as
 is connected to a port, so supply known remote names during initialization:
 
 ```bash
-monux init --input mac=0x11 --input linux=0x0f
+monux init --input mac=hdmi-1 --input linux=displayport-1
 ```
 
 Repeat `--input name=value` as needed. With multiple detected monitors, select
@@ -134,14 +134,17 @@ monitor:
   id: "23"
 
 inputs:
-  mac: 0x11
-  linux: 0x0f
-  windows: 0x10
+  mac: hdmi-1 # DDC 0x11
+  linux: displayport-1 # DDC 0x0f
+  windows: displayport-2 # DDC 0x10
 ```
 
 `monitor.id` is local to the operating system, so it may be `23` on Linux and
 `1` on macOS or Windows. The named `inputs` section can otherwise be identical
-on every machine. Manual editing remains supported.
+on every machine. Connector names are translated to the corresponding MCCS
+input-source values internally. Existing numeric configurations remain valid,
+and vendor-specific values can still be written as hexadecimal. Manual editing
+remains supported.
 
 Override the default path with `--config`/`-c` or `MONUX_CONFIG`.
 
@@ -187,7 +190,7 @@ monux inputs
 monux status
 monux switch mac
 monux switch linux
-monux set 0x0f
+monux set displayport-1
 monux serve
 ```
 

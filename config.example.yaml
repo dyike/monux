@@ -5,7 +5,7 @@ monitor:
 
 inputs:
   # Labels identify the computers connected to these monitor inputs.
-  # These are common Dell P2415Q values; confirm them for your cabling/display.
-  mac: 0x11
-  linux: 0x0f
-  windows: 0x10
+  # Connector names are translated to DDC values internally.
+  mac: hdmi-1
+  linux: displayport-1
+  windows: displayport-2

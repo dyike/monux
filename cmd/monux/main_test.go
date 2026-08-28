@@ -187,7 +187,7 @@ func TestInitCommandAcceptsNamedInputOverrides(t *testing.T) {
 	cmd := newRootCommand()
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"--config", configPath, "init", "--input", "mac=0x11", "--input", "linux=0x0f"})
+	cmd.SetArgs([]string{"--config", configPath, "init", "--input", "mac=hdmi-1", "--input", "linux=displayport-1"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

@@ -38,7 +38,8 @@ cannot identify the operating system attached to an inactive port; add known
 remote mappings first when their standard connector names are not sufficient:
 
 ```bash
-monux init --input linux=0x0f --input mac=0x11 --input windows=0x10
+monux init --input linux=displayport-1 --input mac=hdmi-1 \
+  --input windows=displayport-2
 ```
 
 For a repository build or another non-PATH installation, pass explicit paths

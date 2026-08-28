@@ -186,7 +186,7 @@ func parseConfiguredInput(mapping string) (string, monitor.Input, error) {
 	name, value, found := strings.Cut(mapping, "=")
 	name = strings.TrimSpace(name)
 	if !found || name == "" || strings.TrimSpace(value) == "" {
-		return "", 0, fmt.Errorf("invalid --input %q: use name=value (for example mac=0x11)", mapping)
+		return "", 0, fmt.Errorf("invalid --input %q: use name=value (for example mac=hdmi-1)", mapping)
 	}
 	input, err := monitor.ParseInput(value)
 	if err != nil {
@@ -493,8 +493,8 @@ func newSwitchCommand(configPath *string) *cobra.Command {
 
 func newSetCommand(configPath *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "set <vcp-value>",
-		Short: "Set a raw VCP input value (for example 0x0f)",
+		Use:   "set <connector-or-vcp-value>",
+		Short: "Set an input by connector name or raw VCP value",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(*configPath)

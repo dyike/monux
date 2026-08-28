@@ -21,6 +21,30 @@ type Config struct {
 	Inputs  map[string]monitor.Input `yaml:"inputs"`
 }
 
+func (c *Config) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		Monitor MonitorConfig        `yaml:"monitor"`
+		Inputs  map[string]yaml.Node `yaml:"inputs"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	c.Monitor = raw.Monitor
+	c.Inputs = make(map[string]monitor.Input, len(raw.Inputs))
+	for name, node := range raw.Inputs {
+		if node.Kind != yaml.ScalarNode {
+			return fmt.Errorf("input %q must be a connector name or numeric VCP value", name)
+		}
+		input, err := monitor.ParseInput(node.Value)
+		if err != nil {
+			return fmt.Errorf("input %q: %w", name, err)
+		}
+		c.Inputs[name] = input
+	}
+	return nil
+}
+
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -103,9 +127,18 @@ func marshal(cfg Config) ([]byte, error) {
 	sort.Strings(names)
 	inputs := &yaml.Node{Kind: yaml.MappingNode}
 	for _, name := range names {
+		input := cfg.Inputs[name]
+		value := input.String()
+		tag := "!!int"
+		comment := ""
+		if connector, ok := input.ConnectorKey(); ok {
+			value = connector
+			tag = "!!str"
+			comment = "DDC " + input.String()
+		}
 		inputs.Content = append(inputs.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: name},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: cfg.Inputs[name].String()},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value, LineComment: comment},
 		)
 	}
 	root.Content = append(root.Content, inputs)

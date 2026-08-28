@@ -26,6 +26,22 @@ func TestLoadHexInputs(t *testing.T) {
 	}
 }
 
+func TestLoadNamedConnectorInputs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("monitor:\n  id: 23\ninputs:\n  mac: hdmi-1\n  linux: displayport-1\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Inputs["mac"] != 0x11 || cfg.Inputs["linux"] != 0x0f {
+		t.Fatalf("Load() = %#v", cfg)
+	}
+}
+
 func TestSaveCreatesLoadableHexConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.yaml")
 	cfg := Config{
@@ -44,7 +60,7 @@ func TestSaveCreatesLoadableHexConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{`id: "23"`, "linux: 0x0f", "mac: 0x11"} {
+	for _, want := range []string{`id: "23"`, "linux: displayport-1 # DDC 0x0f", "mac: hdmi-1 # DDC 0x11"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated config does not contain %q:\n%s", want, text)
 		}
