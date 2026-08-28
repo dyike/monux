@@ -58,9 +58,9 @@ Status: source implementation present; it must be compiled and validated on an
 Apple Silicon Mac with the actual monitor connection.
 
 - Uses CoreGraphics for external display detection.
-- Uses a small project-owned CGO bridge to CoreDisplay `IOAVService` I2C calls.
+- Uses a small project-owned CGO bridge to IOKit `IOAVService` I2C calls.
 - Uses the shared Go DDC/CI encoder and parser; it does not execute `m1ddc`.
-- Reads DDC/CI capabilities fragments through the same CoreDisplay transport.
+- Reads DDC/CI capabilities fragments through the same IOKit transport.
 - Currently supports a single external monitor selected as ID `1`.
 - Requires `CGO_ENABLED=1` and Apple Command Line Tools to build.
 

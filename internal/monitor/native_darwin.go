@@ -3,7 +3,7 @@
 package monitor
 
 /*
-#cgo LDFLAGS: -framework CoreDisplay -framework CoreGraphics -framework CoreFoundation
+#cgo LDFLAGS: -framework IOKit -framework CoreGraphics -framework CoreFoundation
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <stdint.h>
@@ -15,6 +15,14 @@ extern int32_t IOAVServiceReadI2C(IOAVServiceRef service, uint32_t chipAddress,
     uint32_t offset, void *outputBuffer, uint32_t outputBufferSize);
 extern int32_t IOAVServiceWriteI2C(IOAVServiceRef service, uint32_t chipAddress,
     uint32_t dataAddress, void *inputBuffer, uint32_t inputBufferSize);
+
+static IOAVServiceRef monux_open_display_service(void) {
+    return IOAVServiceCreate(NULL);
+}
+
+static int monux_display_service_is_null(IOAVServiceRef service) {
+    return service == NULL;
+}
 
 static int monux_first_external_display(uint32_t *displayID, uint32_t *vendor,
     uint32_t *model) {
@@ -87,7 +95,7 @@ func (b *NativeBackend) CurrentInput() (Input, error) {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		request := ddc.GetVCPRequest(ddc.VCPInputSource)
-		if code := darwinWrite(service, request); code != 0 {
+		if code := b.writeRequest(service, request); code != 0 {
 			lastErr = fmt.Errorf("write request: IOKit error 0x%08x", uint32(code))
 			continue
 		}
@@ -127,7 +135,7 @@ func (b *NativeBackend) SetInput(input Input) error {
 	defer C.CFRelease(service)
 
 	request := ddc.SetVCPRequest(ddc.VCPInputSource, uint16(input))
-	if code := darwinWrite(service, request); code != 0 {
+	if code := b.writeRequest(service, request); code != 0 {
 		return fmt.Errorf("set input source: IOKit error 0x%08x", uint32(code))
 	}
 	b.sleep(50 * time.Millisecond)
@@ -150,7 +158,7 @@ func (b *NativeBackend) SupportedInputs() ([]Input, error) {
 		var lastErr error
 		for attempt := 1; attempt <= 3; attempt++ {
 			request := ddc.CapabilitiesRequest(offset)
-			if code := darwinWrite(service, request); code != 0 {
+			if code := b.writeRequest(service, request); code != 0 {
 				lastErr = fmt.Errorf("write request: IOKit error 0x%08x", uint32(code))
 				continue
 			}
@@ -204,19 +212,41 @@ func (b *NativeBackend) requireSelection() error {
 }
 
 func openDarwinDisplayService() (C.IOAVServiceRef, error) {
-	service := C.IOAVServiceCreate(nil)
-	if service == nil {
-		return nil, errors.New("CoreDisplay could not open an external display DDC service")
+	service := C.monux_open_display_service()
+	if C.monux_display_service_is_null(service) != 0 {
+		var zero C.IOAVServiceRef
+		return zero, errors.New("IOKit could not open an external display DDC service")
 	}
 	return service, nil
 }
 
 func darwinWrite(service C.IOAVServiceRef, request []byte) C.int32_t {
+	payload := darwinRequestPayload(request)
 	return C.IOAVServiceWriteI2C(
 		service,
 		C.uint32_t(ddc.DisplayAddress),
 		C.uint32_t(request[0]),
-		unsafe.Pointer(&request[1]),
-		C.uint32_t(len(request)-1),
+		unsafe.Pointer(&payload[0]),
+		C.uint32_t(len(payload)),
 	)
+}
+
+func (b *NativeBackend) writeRequest(service C.IOAVServiceRef, request []byte) C.int32_t {
+	for range 2 {
+		b.sleep(10 * time.Millisecond)
+		if code := darwinWrite(service, request); code != 0 {
+			return code
+		}
+	}
+	return 0
+}
+
+func darwinRequestPayload(request []byte) []byte {
+	payload := append([]byte(nil), request[1:]...)
+	// IOAVService receives the host source address separately. For a Get VCP
+	// request, its transport expects the checksum to exclude that address.
+	if len(request) == 5 && request[2] == 0x01 {
+		payload[len(payload)-1] ^= request[0]
+	}
+	return payload
 }

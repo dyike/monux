@@ -33,7 +33,7 @@ the configuration are available.
 | --- | --- | --- | --- |
 | Linux | DRM/I2C sysfs | `/dev/i2c-*` + DDC/CI frames | None |
 | Windows | Win32 monitor enumeration | `Dxva2.dll` VCP API | None |
-| macOS | CoreGraphics | CoreDisplay `IOAVService` | None |
+| macOS | CoreGraphics | IOKit `IOAVService` | None |
 
 The platform-independent package in `internal/ddc` owns DDC/CI frame encoding,
 checksums, capabilities reassembly, VCP reply parsing, and VCP code `0x60`.
@@ -393,7 +393,7 @@ PeerController
  ├── local monitor.Controller
  │    ├── native_linux.go  ── DDC/CI over /dev/i2c
  │    ├── native_windows.go ─ Win32 physical monitor API
- │    └── native_darwin.go ── CoreDisplay IOAVService
+ │    └── native_darwin.go ── IOKit IOAVService
  └── configured peer ── authenticated local-only HTTP API
 ```
 
