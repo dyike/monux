@@ -39,6 +39,10 @@ func (s *Switcher) Current() (monitor.Input, error) {
 	return s.controller.CurrentInput()
 }
 
+func (s *Switcher) Set(input monitor.Input) error {
+	return s.controller.SetInput(input)
+}
+
 func (s *Switcher) Name(input monitor.Input) (string, bool) {
 	names := make([]string, 0, len(s.inputs))
 	for name, candidate := range s.inputs {

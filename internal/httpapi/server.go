@@ -44,6 +44,8 @@ func New(backend monitor.Backend, switcher *service.Switcher, token string) *Ser
 	mux.Handle("GET /api/v1/capabilities", server.authorize(http.HandlerFunc(server.capabilities)))
 	mux.Handle("POST /api/v1/switch/{name}", server.authorize(http.HandlerFunc(server.switchInput)))
 	mux.Handle("POST /api/v1/set/{value}", server.authorize(http.HandlerFunc(server.setInput)))
+	mux.Handle("GET /api/v1/local/status", server.authorize(http.HandlerFunc(server.localStatus)))
+	mux.Handle("POST /api/v1/local/set/{value}", server.authorize(http.HandlerFunc(server.localSetInput)))
 	server.handler = mux
 	return server
 }
@@ -57,9 +59,6 @@ func (s *Server) health(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) status(writer http.ResponseWriter, _ *http.Request) {
-	s.operation.Lock()
-	defer s.operation.Unlock()
-
 	input, err := s.switcher.Current()
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, fmt.Errorf("read current input: %w", err))
@@ -155,8 +154,6 @@ func (s *Server) switchInput(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 
-	s.operation.Lock()
-	defer s.operation.Unlock()
 	if err := s.switcher.Switch(name); err != nil {
 		writeError(writer, http.StatusInternalServerError, fmt.Errorf("switch to %q: %w", name, err))
 		return
@@ -171,10 +168,36 @@ func (s *Server) setInput(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
+	if err := s.switcher.Set(input); err != nil {
+		writeError(writer, http.StatusInternalServerError, fmt.Errorf("set input to %s: %w", input, err))
+		return
+	}
+	writeJSON(writer, http.StatusOK, s.response(input))
+}
+
+func (s *Server) localStatus(writer http.ResponseWriter, _ *http.Request) {
+	s.operation.Lock()
+	defer s.operation.Unlock()
+
+	input, err := s.backend.CurrentInput()
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, fmt.Errorf("read local current input: %w", err))
+		return
+	}
+	writeJSON(writer, http.StatusOK, s.response(input))
+}
+
+func (s *Server) localSetInput(writer http.ResponseWriter, request *http.Request) {
+	input, err := monitor.ParseInput(request.PathValue("value"))
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err)
+		return
+	}
+
 	s.operation.Lock()
 	defer s.operation.Unlock()
 	if err := s.backend.SetInput(input); err != nil {
-		writeError(writer, http.StatusInternalServerError, fmt.Errorf("set input to %s: %w", input, err))
+		writeError(writer, http.StatusInternalServerError, fmt.Errorf("set local input to %s: %w", input, err))
 		return
 	}
 	writeJSON(writer, http.StatusOK, s.response(input))

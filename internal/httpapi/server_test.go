@@ -159,6 +159,49 @@ func TestControllerError(t *testing.T) {
 	}
 }
 
+func TestPublicAPIUsesActivePeerWhenLocalDDCFails(t *testing.T) {
+	macBackend := &fakeController{current: 0x11}
+	macServer := newTestServer(macBackend, "shared")
+	peerClient := handlerClient(macServer)
+
+	linuxBackend := &fakeController{err: errors.New("inactive DisplayPort")}
+	peerController := service.NewPeerController(
+		linuxBackend,
+		[]service.Peer{{Name: "mac", URL: "http://mac", Token: "shared"}},
+		peerClient,
+	)
+	linuxSwitcher := service.NewSwitcher(peerController, map[string]monitor.Input{"mac": 0x11, "linux": 0x0f})
+	linuxServer := New(linuxBackend, linuxSwitcher, "")
+
+	response := request(t, linuxServer, http.MethodPost, "/api/v1/switch/linux", "")
+	if response.Code != http.StatusOK || macBackend.current != 0x0f {
+		t.Fatalf("switch status = %d, Mac current = %s, body = %s", response.Code, macBackend.current, response.Body.String())
+	}
+	response = request(t, linuxServer, http.MethodGet, "/api/v1/status", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status through peer = %d, body = %s", response.Code, response.Body.String())
+	}
+	var body inputResponse
+	decode(t, response, &body)
+	if body.Name != "linux" || body.Value != 15 {
+		t.Fatalf("peer status response = %#v", body)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+func handlerClient(handler http.Handler) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response.Result(), nil
+	})}
+}
+
 func newTestServer(backend *fakeController, token string) *Server {
 	switcher := service.NewSwitcher(backend, map[string]monitor.Input{"mac": 0x11, "linux": 0x0f})
 	return New(backend, switcher, token)

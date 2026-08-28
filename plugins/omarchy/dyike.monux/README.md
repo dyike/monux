@@ -79,3 +79,7 @@ Configure plugin settings in `~/.config/omarchy/shell.json`, for example:
 
 The `monux` executable and its configuration must work from a non-interactive
 process before the widget can control the monitor.
+
+When `peers` are configured in Monux, the widget needs no peer-specific QML.
+Its ordinary `monux status` and `monux switch <name>` calls automatically use
+the active peer whenever this Linux machine's local DDC connection is inactive.

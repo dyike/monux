@@ -101,6 +101,17 @@ curl -X POST http://127.0.0.1:8765/api/v1/set/0x0f
 An invalid value returns HTTP `400`. Prefer named switching in normal clients;
 the raw endpoint is intended for setup and diagnostics.
 
+Public `status`, `switch`, and `set` operations fall back to configured peers
+when local DDC is unavailable. Peer nodes use these authenticated local-only
+endpoints internally:
+
+```http
+GET /api/v1/local/status
+POST /api/v1/local/set/0x0f
+```
+
+Local-only endpoints never perform peer fallback, preventing forwarding loops.
+
 ## Authentication
 
 Set `MONUX_HTTP_TOKEN` or pass `--token` to require this header on every
@@ -126,7 +137,6 @@ The server loads configuration once at startup. Restart it after editing input
 names or `monitor.id`. Monitor operations are serialized because many DDC/CI
 transports do not tolerate overlapping requests.
 
-The server controls the monitor locally through the video connection of the
-machine where it runs. It does not use SSH and does not forward DDC commands to
-another computer. Whether a monitor accepts DDC commands from an inactive input
-remains monitor-dependent.
+The server first controls the monitor locally through that machine's video
+connection. When local DDC fails and `peers` are configured, it forwards the
+operation over HTTP to a peer's local-only endpoint. It does not use SSH.

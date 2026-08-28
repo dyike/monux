@@ -130,6 +130,13 @@ monux init --monitor 23
 The resulting file looks like:
 
 ```yaml
+node:
+  name: linux
+
+peers:
+  - name: mac
+    url: http://192.168.5.82:8765
+
 monitor:
   id: "23"
 
@@ -145,6 +152,10 @@ on every machine. Connector names are translated to the corresponding MCCS
 input-source values internally. Existing numeric configurations remain valid,
 and vendor-specific values can still be written as hexadecimal. Manual editing
 remains supported.
+
+`node.name` identifies this installation. `peers` lists other computers that
+can execute DDC through the monitor's currently active input. The optional peer
+`token` must match that peer server's `MONUX_HTTP_TOKEN` or `--token` value.
 
 Override the default path with `--config`/`-c` or `MONUX_CONFIG`.
 
@@ -282,6 +293,54 @@ monitor-reported values, current input, connector labels, and configured
 names. `POST /api/v1/set/{value}` exposes the CLI's raw `set` operation and
 should be reserved for diagnostics; normal clients should switch by name.
 
+### Peer fallback
+
+The validated Dell P2415Q stops accepting DDC through DisplayPort as soon as
+HDMI becomes active. With peer configuration, Monux tries local DDC first and
+then asks another node to execute the operation through its active connection.
+
+Linux points to the known Mac address:
+
+```yaml
+node:
+  name: linux
+peers:
+  - name: mac
+    url: http://192.168.5.82:8765
+    token: replace-with-the-same-secret
+```
+
+The Mac points back to Linux:
+
+```yaml
+node:
+  name: mac
+peers:
+  - name: linux
+    url: http://<linux-ip>:8765
+    token: replace-with-the-same-secret
+```
+
+Run both servers on the LAN with the same token:
+
+```bash
+MONUX_HTTP_TOKEN='replace-with-the-same-secret' \
+  monux serve --listen 0.0.0.0:8765
+```
+
+For example, while Mac is displayed, a switch-back request may still be sent
+to Linux. Linux forwards it to the active Mac node:
+
+```bash
+curl -X POST \
+  -H 'Authorization: Bearer replace-with-the-same-secret' \
+  http://<linux-ip>:8765/api/v1/switch/linux
+```
+
+Peer calls use local-only endpoints that never forward again, preventing
+routing loops. Peer requests time out after three seconds and report local and
+remote failures separately.
+
 Environment variables:
 
 | Variable | Purpose | Default |
@@ -324,10 +383,12 @@ CLI
 Switcher ── named inputs ◀── HTTP API
  │
  ▼
-monitor.Controller
- ├── native_linux.go  ── DDC/CI over /dev/i2c
- ├── native_windows.go ─ Win32 physical monitor API
- └── native_darwin.go ── CoreDisplay IOAVService
+PeerController
+ ├── local monitor.Controller
+ │    ├── native_linux.go  ── DDC/CI over /dev/i2c
+ │    ├── native_windows.go ─ Win32 physical monitor API
+ │    └── native_darwin.go ── CoreDisplay IOAVService
+ └── configured peer ── authenticated local-only HTTP API
 ```
 
 The service layer does not know which operating system it is running on. Input

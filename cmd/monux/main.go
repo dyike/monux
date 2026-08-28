@@ -117,6 +117,9 @@ func newInitCommand(configPath *string) *cobra.Command {
 				return fmt.Errorf("monitor %s did not provide a current or supported input: current: %v; capabilities: %v", display.ID, currentErr, supportedErr)
 			}
 
+			if cfg.Node.Name == "" {
+				cfg.Node.Name = defaultLocalInputName()
+			}
 			cfg.Monitor.ID = display.ID
 			if err := config.Save(*configPath, cfg); err != nil {
 				return err
@@ -497,19 +500,15 @@ func newSetCommand(configPath *string) *cobra.Command {
 		Short: "Set an input by connector name or raw VCP value",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(*configPath)
-			if err != nil {
-				return err
-			}
 			input, err := monitor.ParseInput(args[0])
 			if err != nil {
 				return err
 			}
-			backend, err := newBackend(cfg)
+			_, _, switcher, err := loadControl(*configPath)
 			if err != nil {
 				return err
 			}
-			if err := backend.SetInput(input); err != nil {
+			if err := switcher.Set(input); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "set input to %s\n", input)
@@ -528,11 +527,17 @@ func loadControl(path string) (config.Config, monitor.Backend, *service.Switcher
 	if err != nil {
 		return config.Config{}, nil, nil, err
 	}
-	controller, err := newBackend(cfg)
+	rawBackend, err := newBackend(cfg)
 	if err != nil {
 		return config.Config{}, nil, nil, err
 	}
-	return cfg, controller, service.NewSwitcher(controller, cfg.Inputs), nil
+	controller := service.NewSynchronizedBackend(rawBackend)
+	peers := make([]service.Peer, 0, len(cfg.Peers))
+	for _, peer := range cfg.Peers {
+		peers = append(peers, service.Peer{Name: peer.Name, URL: peer.URL, Token: peer.Token})
+	}
+	routedController := service.NewPeerController(controller, peers, nil)
+	return cfg, controller, service.NewSwitcher(routedController, cfg.Inputs), nil
 }
 
 func newBackend(cfg config.Config) (monitor.Backend, error) {

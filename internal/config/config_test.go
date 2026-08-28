@@ -45,6 +45,8 @@ func TestLoadNamedConnectorInputs(t *testing.T) {
 func TestSaveCreatesLoadableHexConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.yaml")
 	cfg := Config{
+		Node:    NodeConfig{Name: "linux"},
+		Peers:   []PeerConfig{{Name: "mac", URL: "http://192.168.5.82:8765", Token: "secret"}},
 		Monitor: MonitorConfig{ID: "23"},
 		Inputs: map[string]monitor.Input{
 			"mac":   0x11,
@@ -60,7 +62,11 @@ func TestSaveCreatesLoadableHexConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{`id: "23"`, "linux: displayport-1 # DDC 0x0f", "mac: hdmi-1 # DDC 0x11"} {
+	for _, want := range []string{
+		"node:\n  name: linux",
+		"peers:\n  - name: mac\n    url: http://192.168.5.82:8765\n    token: secret",
+		`id: "23"`, "linux: displayport-1 # DDC 0x0f", "mac: hdmi-1 # DDC 0x11",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated config does not contain %q:\n%s", want, text)
 		}
@@ -73,8 +79,24 @@ func TestSaveCreatesLoadableHexConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() generated config error = %v", err)
 	}
-	if loaded.Monitor.ID != "23" || loaded.Inputs["linux"] != 0x0f || loaded.Inputs["mac"] != 0x11 {
+	if loaded.Node.Name != "linux" || len(loaded.Peers) != 1 || loaded.Peers[0].URL != "http://192.168.5.82:8765" || loaded.Monitor.ID != "23" || loaded.Inputs["linux"] != 0x0f || loaded.Inputs["mac"] != 0x11 {
 		t.Fatalf("Load() generated config = %#v", loaded)
+	}
+}
+
+func TestValidateRejectsInvalidPeers(t *testing.T) {
+	base := Config{Inputs: map[string]monitor.Input{"linux": 0x0f}}
+	for _, peer := range []PeerConfig{
+		{Name: "", URL: "http://192.168.5.82:8765"},
+		{Name: "mac", URL: "192.168.5.82:8765"},
+		{Name: "mac", URL: "ftp://192.168.5.82"},
+		{Name: "mac", URL: "http://user@192.168.5.82"},
+	} {
+		cfg := base
+		cfg.Peers = []PeerConfig{peer}
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("Validate() peer = %#v, error = nil", peer)
+		}
 	}
 }
 
