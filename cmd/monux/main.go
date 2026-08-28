@@ -1,15 +1,22 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/dyike/monux/internal/config"
+	"github.com/dyike/monux/internal/httpapi"
 	"github.com/dyike/monux/internal/monitor"
 	"github.com/dyike/monux/internal/service"
 	"github.com/spf13/cobra"
@@ -39,8 +46,82 @@ func newRootCommand() *cobra.Command {
 		newStatusCommand(&configPath),
 		newSwitchCommand(&configPath),
 		newSetCommand(&configPath),
+		newServeCommand(&configPath),
 	)
 	return root
+}
+
+func newServeCommand(configPath *string) *cobra.Command {
+	listenAddress := envOrDefault("MONUX_HTTP_LISTEN", "127.0.0.1:8765")
+	token := os.Getenv("MONUX_HTTP_TOKEN")
+	command := &cobra.Command{
+		Use:   "serve",
+		Short: "Run the monitor control HTTP API",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, switcher, err := loadSwitcher(*configPath)
+			if err != nil {
+				return err
+			}
+			listener, err := net.Listen("tcp", listenAddress)
+			if err != nil {
+				return fmt.Errorf("listen on %s: %w", listenAddress, err)
+			}
+			defer listener.Close()
+
+			if token == "" && !isLoopbackAddress(listener.Addr().String()) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: HTTP API is listening beyond localhost without authentication; set MONUX_HTTP_TOKEN")
+			}
+			server := &http.Server{
+				Handler:           httpapi.New(switcher, token),
+				ReadHeaderTimeout: 5 * time.Second,
+				IdleTimeout:       60 * time.Second,
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "monux HTTP API listening on http://%s\n", listener.Addr())
+
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			serveErr := make(chan error, 1)
+			go func() { serveErr <- server.Serve(listener) }()
+
+			select {
+			case err := <-serveErr:
+				if errors.Is(err, http.ErrServerClosed) {
+					return nil
+				}
+				return err
+			case <-ctx.Done():
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := server.Shutdown(shutdownCtx); err != nil {
+					return fmt.Errorf("shut down HTTP server: %w", err)
+				}
+				return nil
+			}
+		},
+	}
+	command.Flags().StringVar(&listenAddress, "listen", listenAddress, "HTTP listen address")
+	command.Flags().StringVar(&token, "token", token, "Bearer token (prefer MONUX_HTTP_TOKEN)")
+	return command
+}
+
+func envOrDefault(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func isLoopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func newInputsCommand(configPath *string) *cobra.Command {

@@ -13,6 +13,11 @@ type Switcher struct {
 	inputs     map[string]monitor.Input
 }
 
+type NamedInput struct {
+	Name  string
+	Input monitor.Input
+}
+
 func NewSwitcher(controller monitor.Controller, inputs map[string]monitor.Input) *Switcher {
 	return &Switcher{controller: controller, inputs: inputs}
 }
@@ -46,4 +51,18 @@ func (s *Switcher) Name(input monitor.Input) (string, bool) {
 	}
 	sort.Strings(names)
 	return names[0], true
+}
+
+func (s *Switcher) Input(name string) (monitor.Input, bool) {
+	input, ok := s.inputs[name]
+	return input, ok
+}
+
+func (s *Switcher) Inputs() []NamedInput {
+	inputs := make([]NamedInput, 0, len(s.inputs))
+	for name, input := range s.inputs {
+		inputs = append(inputs, NamedInput{Name: name, Input: input})
+	}
+	sort.Slice(inputs, func(i, j int) bool { return inputs[i].Name < inputs[j].Name })
+	return inputs
 }

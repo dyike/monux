@@ -5,7 +5,8 @@ Windows. The same Go CLI is installed on every machine, and each installation
 talks to the monitor locally through its own video connection.
 
 There is no SSH, daemon, network dependency, `ddcutil`, or `m1ddc` runtime
-dependency.
+dependency for local CLI use. The optional built-in HTTP server can expose the
+same switcher to another computer or an ESP32.
 
 ## Topology
 
@@ -153,6 +154,7 @@ monux status
 monux switch mac
 monux switch linux
 monux set 0x0f
+monux serve
 ```
 
 Common MCCS input-source values are:
@@ -172,6 +174,60 @@ On the validated Dell P2415Q, the monitor reports `0x0f`, `0x10`, and `0x11`.
 Its second DisplayPort value corresponds to the monitor's second DP-family
 connector (for example Mini DisplayPort); DDC/CI does not expose the physical
 socket label itself.
+
+## HTTP API
+
+The HTTP server runs in the foreground and uses the same configuration and
+native monitor backend as the CLI:
+
+```bash
+monux serve
+```
+
+It listens on `127.0.0.1:8765` by default. Query it locally with:
+
+```bash
+curl http://127.0.0.1:8765/healthz
+curl http://127.0.0.1:8765/api/v1/status
+curl http://127.0.0.1:8765/api/v1/inputs
+curl -X POST http://127.0.0.1:8765/api/v1/switch/linux
+```
+
+Example status response:
+
+```json
+{"name":"mac","input":"0x11","value":17}
+```
+
+For access from an ESP32 or another machine, bind to the LAN and set a token:
+
+```bash
+MONUX_HTTP_TOKEN='replace-with-a-secret' \
+  monux serve --listen 0.0.0.0:8765
+```
+
+Clients then send the token as a Bearer credential:
+
+```bash
+curl -H 'Authorization: Bearer replace-with-a-secret' \
+  http://linux-ip:8765/api/v1/status
+
+curl -X POST \
+  -H 'Authorization: Bearer replace-with-a-secret' \
+  http://linux-ip:8765/api/v1/switch/mac
+```
+
+`GET /healthz` remains unauthenticated so a supervisor can check process
+health. DDC operations from concurrent HTTP requests are serialized. The
+server handles `SIGINT` and `SIGTERM` with a graceful shutdown; use systemd,
+launchd, or another platform supervisor when it should run as a daemon.
+
+Environment variables:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `MONUX_HTTP_LISTEN` | HTTP listen address | `127.0.0.1:8765` |
+| `MONUX_HTTP_TOKEN` | Optional Bearer token | empty |
 
 ## Linux permissions
 
@@ -205,7 +261,7 @@ also issue a successful command is hardware-dependent.
 CLI
  │
  ▼
-Switcher ── named inputs
+Switcher ── named inputs ◀── HTTP API
  │
  ▼
 monitor.Controller
