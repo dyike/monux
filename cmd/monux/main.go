@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/dyike/monux/internal/config"
 	"github.com/dyike/monux/internal/monitor"
@@ -32,11 +35,108 @@ func newRootCommand() *cobra.Command {
 
 	root.AddCommand(
 		newDetectCommand(),
+		newInputsCommand(&configPath),
 		newStatusCommand(&configPath),
 		newSwitchCommand(&configPath),
 		newSetCommand(&configPath),
 	)
 	return root
+}
+
+func newInputsCommand(configPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "inputs",
+		Short: "List monitor-reported input sources",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, backend, err := loadInputsBackend(*configPath)
+			if err != nil {
+				return err
+			}
+
+			supported, supportedErr := backend.SupportedInputs()
+			current, currentErr := backend.CurrentInput()
+			if supportedErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not read monitor input capabilities: %v; showing configured inputs\n", supportedErr)
+			}
+			if currentErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not read current input: %v\n", currentErr)
+			}
+
+			values := make(map[monitor.Input]bool)
+			reported := make(map[monitor.Input]bool)
+			names := make(map[monitor.Input][]string)
+			for _, input := range supported {
+				values[input] = true
+				reported[input] = true
+			}
+			for name, input := range cfg.Inputs {
+				values[input] = true
+				names[input] = append(names[input], name)
+			}
+			if currentErr == nil {
+				values[current] = true
+			}
+
+			ordered := make([]monitor.Input, 0, len(values))
+			for input := range values {
+				ordered = append(ordered, input)
+			}
+			sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+			fmt.Fprintln(writer, "VALUE\tCONNECTOR\tREPORTED\tCURRENT\tNAME")
+			for _, input := range ordered {
+				reportStatus := "unknown"
+				if supportedErr == nil {
+					reportStatus = "no"
+					if reported[input] {
+						reportStatus = "yes"
+					}
+				}
+				currentStatus := "no"
+				if currentErr != nil {
+					currentStatus = "unknown"
+				} else if input == current {
+					currentStatus = "yes"
+				}
+				sort.Strings(names[input])
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", input, connectorName(input), reportStatus, currentStatus, strings.Join(names[input], ","))
+			}
+			return writer.Flush()
+		},
+	}
+}
+
+func loadInputsBackend(path string) (config.Config, monitor.Backend, error) {
+	cfg, err := config.Load(path)
+	if err == nil {
+		backend, err := newBackend(cfg)
+		return cfg, backend, err
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return config.Config{}, nil, err
+	}
+
+	detector, err := newNativeBackend("")
+	if err != nil {
+		return config.Config{}, nil, err
+	}
+	displays, err := detector.Detect()
+	if err != nil {
+		return config.Config{}, nil, fmt.Errorf("configuration %q does not exist and monitor detection failed: %w", path, err)
+	}
+	if len(displays) == 0 {
+		return config.Config{}, nil, fmt.Errorf("configuration %q does not exist and no monitor was detected", path)
+	}
+	if len(displays) > 1 {
+		return config.Config{}, nil, fmt.Errorf("configuration %q does not exist and %d monitors were detected; run monux detect and configure monitor.id", path, len(displays))
+	}
+	backend, err := newNativeBackend(displays[0].ID)
+	if err != nil {
+		return config.Config{}, nil, err
+	}
+	return config.Config{Inputs: map[string]monitor.Input{}}, backend, nil
 }
 
 func newDetectCommand() *cobra.Command {
@@ -153,4 +253,32 @@ func parseInput(value string) (monitor.Input, error) {
 		return 0, fmt.Errorf("invalid input value %q: use decimal or 0x-prefixed hexadecimal", value)
 	}
 	return monitor.Input(parsed), nil
+}
+
+func connectorName(input monitor.Input) string {
+	names := map[monitor.Input]string{
+		0x01: "VGA 1",
+		0x02: "VGA 2",
+		0x03: "DVI 1",
+		0x04: "DVI 2",
+		0x05: "Composite 1",
+		0x06: "Composite 2",
+		0x07: "S-Video 1",
+		0x08: "S-Video 2",
+		0x09: "Tuner 1",
+		0x0a: "Tuner 2",
+		0x0b: "Tuner 3",
+		0x0c: "Component 1",
+		0x0d: "Component 2",
+		0x0e: "Component 3",
+		0x0f: "DisplayPort 1",
+		0x10: "DisplayPort 2",
+		0x11: "HDMI 1",
+		0x12: "HDMI 2",
+		0x1b: "USB-C",
+	}
+	if name, ok := names[input]; ok {
+		return name
+	}
+	return "Unknown"
 }

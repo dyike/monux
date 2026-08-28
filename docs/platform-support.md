@@ -6,8 +6,11 @@ firmware, so compilation alone is not considered platform validation.
 
 ## Linux
 
-Status: implemented and unit-tested; physical monitor validation pending in
-the current development environment.
+Status: implemented and unit-tested. Detection plus VCP `0x60` read/write have
+been validated against a Dell P2415Q on the current Linux development device.
+Native capabilities discovery reports `0x0f` (DisplayPort 1), `0x10`
+(DisplayPort 2), and `0x11` (HDMI 1), and identifies `0x11` as the current
+input without invoking an external monitor-control binary.
 
 - Enumerates connected DRM connectors through
   `/sys/class/drm/card*-*/ddc/i2c-dev/i2c-*`.
@@ -16,6 +19,8 @@ the current development environment.
 - Opens `/dev/i2c-N`, selects the 7-bit DDC address `0x37`, and sends native
   DDC/CI frames.
 - Reads and validates Get VCP replies, including checksum and requested code.
+- Reads offset-based DDC/CI capabilities fragments and extracts the monitor's
+  declared VCP `0x60` input-source values.
 - Writes VCP input source `0x60` directly.
 
 Risks and follow-up work:
@@ -35,6 +40,9 @@ physical Windows validation pending.
   `GetNumberOfPhysicalMonitorsFromHMONITOR` and
   `GetPhysicalMonitorsFromHMONITOR`.
 - Reads VCP `0x60` with `GetVCPFeatureAndVCPFeatureReply`.
+- Reads the capabilities string with
+  `GetCapabilitiesStringLength` and
+  `CapabilitiesRequestAndCapabilitiesReply`.
 - Writes VCP `0x60` with `SetVCPFeature`.
 - Releases every physical monitor handle with `DestroyPhysicalMonitor`.
 
@@ -52,6 +60,7 @@ Apple Silicon Mac with the actual monitor connection.
 - Uses CoreGraphics for external display detection.
 - Uses a small project-owned CGO bridge to CoreDisplay `IOAVService` I2C calls.
 - Uses the shared Go DDC/CI encoder and parser; it does not execute `m1ddc`.
+- Reads DDC/CI capabilities fragments through the same CoreDisplay transport.
 - Currently supports a single external monitor selected as ID `1`.
 - Requires `CGO_ENABLED=1` and Apple Command Line Tools to build.
 
@@ -73,8 +82,10 @@ Important constraints:
 - Set VCP Feature request construction.
 - XOR checksum generation.
 - Get VCP Feature Reply validation and parsing.
+- Capabilities Request construction, fragmented-reply validation, and
+  capabilities-string reassembly.
+- Extraction of supported values declared for VCP input source `0x60`.
 - Known VESA packet examples as unit-test vectors.
 
-Future protocol work includes capabilities requests, EDID parsing beyond the
-Linux monitor-name descriptor, retry classification, and monitor-specific
-quirks.
+Future protocol work includes EDID parsing beyond the Linux monitor-name
+descriptor, retry classification, and monitor-specific quirks.

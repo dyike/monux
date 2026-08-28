@@ -23,6 +23,8 @@ var (
 	procDestroyPhysicalMonitor          = dxva2DLL.NewProc("DestroyPhysicalMonitor")
 	procGetVCPFeatureAndVCPFeatureReply = dxva2DLL.NewProc("GetVCPFeatureAndVCPFeatureReply")
 	procSetVCPFeature                   = dxva2DLL.NewProc("SetVCPFeature")
+	procGetCapabilitiesStringLength     = dxva2DLL.NewProc("GetCapabilitiesStringLength")
+	procCapabilitiesRequestAndReply     = dxva2DLL.NewProc("CapabilitiesRequestAndCapabilitiesReply")
 )
 
 type physicalMonitor struct {
@@ -98,6 +100,42 @@ func (b *NativeBackend) SetInput(input Input) error {
 		}
 		return nil
 	})
+}
+
+func (b *NativeBackend) SupportedInputs() ([]Input, error) {
+	var inputs []Input
+	err := b.withMonitor(func(monitor physicalMonitor) error {
+		var length uint32
+		result, _, callErr := procGetCapabilitiesStringLength.Call(
+			uintptr(monitor.handle),
+			uintptr(unsafe.Pointer(&length)),
+		)
+		if result == 0 {
+			return windowsCallError("get monitor capabilities string length", callErr)
+		}
+		if length == 0 || length > 64*1024 {
+			return fmt.Errorf("monitor returned invalid capabilities string length %d", length)
+		}
+		buffer := make([]byte, length)
+		result, _, callErr = procCapabilitiesRequestAndReply.Call(
+			uintptr(monitor.handle),
+			uintptr(unsafe.Pointer(&buffer[0])),
+			uintptr(length),
+		)
+		if result == 0 {
+			return windowsCallError("read monitor capabilities string", callErr)
+		}
+		if end := strings.IndexByte(string(buffer), 0); end >= 0 {
+			buffer = buffer[:end]
+		}
+		parsed, err := inputsFromCapabilities(string(buffer))
+		if err != nil {
+			return fmt.Errorf("parse monitor input capabilities: %w", err)
+		}
+		inputs = parsed
+		return nil
+	})
+	return inputs, err
 }
 
 func (b *NativeBackend) withMonitor(action func(physicalMonitor) error) error {

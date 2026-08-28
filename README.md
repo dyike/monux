@@ -35,8 +35,8 @@ the configuration are available.
 | macOS | CoreGraphics | CoreDisplay `IOAVService` | None |
 
 The platform-independent package in `internal/ddc` owns DDC/CI frame encoding,
-checksums, VCP reply parsing, and VCP code `0x60`. Platform files only perform
-discovery and transport.
+checksums, capabilities reassembly, VCP reply parsing, and VCP code `0x60`.
+Platform files only perform discovery and transport.
 
 See [platform support](docs/platform-support.md) for implementation details and
 current hardware-validation status.
@@ -102,7 +102,7 @@ monitor:
 inputs:
   mac: 0x11
   linux: 0x0f
-  windows: 0x12
+  windows: 0x10
 ```
 
 `monitor.id` is local to the operating system, so it may be `15` on Linux and
@@ -111,10 +111,44 @@ on every machine.
 
 Override the default path with `--config`/`-c` or `MONUX_CONFIG`.
 
+## Discover input ports
+
+Ask the monitor which VCP `0x60` input values its firmware reports:
+
+```bash
+monux inputs
+```
+
+When no configuration exists and exactly one monitor is detected, `inputs`
+selects it automatically. With multiple monitors, configure `monitor.id` to
+make the selection explicit. Configuration is still required for named
+commands such as `monux switch mac`.
+
+Example:
+
+```text
+VALUE  CONNECTOR      REPORTED  CURRENT  NAME
+0x0f   DisplayPort 1  yes       no       linux
+0x10   DisplayPort 2  yes       no       windows
+0x11   HDMI 1         yes       yes      mac
+```
+
+`REPORTED=yes` means the value came from the monitor's DDC/CI capabilities
+string. `CURRENT=yes` is the input currently selected by VCP `0x60`. `NAME`
+comes from the local YAML configuration. The connector label is the standard
+meaning of the value; monitor firmware may use a vendor-specific value, which
+is shown as `Unknown` rather than guessed.
+
+If a monitor or connection cannot return a capabilities string, the command
+prints a warning and still lists configured values with `REPORTED=unknown`.
+This fallback keeps switching usable without claiming that a port was
+detected.
+
 ## Use
 
 ```bash
 monux detect
+monux inputs
 monux status
 monux switch mac
 monux switch linux
@@ -131,8 +165,13 @@ Common MCCS input-source values are:
 | HDMI 2 | `0x12` | 18 |
 | USB-C | `0x1b` | 27 |
 
-Monitor firmware can use different or vendor-specific values. Confirm the
-actual Dell P2415Q inputs before relying on automation.
+Monitor firmware can use different or vendor-specific values. Use
+`monux inputs` on each connected machine before relying on automation.
+
+On the validated Dell P2415Q, the monitor reports `0x0f`, `0x10`, and `0x11`.
+Its second DisplayPort value corresponds to the monitor's second DP-family
+connector (for example Mini DisplayPort); DDC/CI does not expose the physical
+socket label itself.
 
 ## Linux permissions
 
@@ -175,6 +214,6 @@ monitor.Controller
  └── native_darwin.go ── CoreDisplay IOAVService
 ```
 
-The service layer does not know which operating system it is running on. New
-platform behavior stays behind `monitor.Controller`, while protocol tests stay
-portable.
+The service layer does not know which operating system it is running on. Input
+capabilities are exposed by the platform-native `monitor.Backend`; switching
+stays behind `monitor.Controller`, while protocol tests stay portable.

@@ -84,27 +84,34 @@ func (b *NativeBackend) CurrentInput() (Input, error) {
 	}
 	defer C.CFRelease(service)
 
-	request := ddc.GetVCPRequest(ddc.VCPInputSource)
-	if code := darwinWrite(service, request); code != 0 {
-		return 0, fmt.Errorf("write DDC/CI request: IOKit error 0x%08x", uint32(code))
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		request := ddc.GetVCPRequest(ddc.VCPInputSource)
+		if code := darwinWrite(service, request); code != 0 {
+			lastErr = fmt.Errorf("write request: IOKit error 0x%08x", uint32(code))
+			continue
+		}
+		b.sleep(40 * time.Millisecond)
+		reply := make([]byte, 12)
+		code := C.IOAVServiceReadI2C(
+			service,
+			C.uint32_t(ddc.DisplayAddress),
+			C.uint32_t(ddc.HostSourceAddress),
+			unsafe.Pointer(&reply[0]),
+			C.uint32_t(len(reply)),
+		)
+		if code != 0 {
+			lastErr = fmt.Errorf("read reply: IOKit error 0x%08x", uint32(code))
+			continue
+		}
+		value, err := ddc.ParseVCPReply(reply[:11], ddc.VCPInputSource)
+		if err == nil {
+			return Input(value.Current), nil
+		}
+		lastErr = err
+		b.sleep(100 * time.Millisecond)
 	}
-	b.sleep(40 * time.Millisecond)
-	reply := make([]byte, 12)
-	code := C.IOAVServiceReadI2C(
-		service,
-		C.uint32_t(ddc.DisplayAddress),
-		C.uint32_t(ddc.HostSourceAddress),
-		unsafe.Pointer(&reply[0]),
-		C.uint32_t(len(reply)),
-	)
-	if code != 0 {
-		return 0, fmt.Errorf("read DDC/CI reply: IOKit error 0x%08x", uint32(code))
-	}
-	value, err := ddc.ParseVCPReply(reply[:11], ddc.VCPInputSource)
-	if err != nil {
-		return 0, err
-	}
-	return Input(value.Current), nil
+	return 0, fmt.Errorf("read input source failed after 3 attempts: %w", lastErr)
 }
 
 func (b *NativeBackend) SetInput(input Input) error {
@@ -125,6 +132,60 @@ func (b *NativeBackend) SetInput(input Input) error {
 	}
 	b.sleep(50 * time.Millisecond)
 	return nil
+}
+
+func (b *NativeBackend) SupportedInputs() ([]Input, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.requireSelection(); err != nil {
+		return nil, err
+	}
+	service, err := openDarwinDisplayService()
+	if err != nil {
+		return nil, err
+	}
+	defer C.CFRelease(service)
+
+	capabilities, err := ddc.ReadCapabilities(func(offset uint16) ([]byte, error) {
+		var lastErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			request := ddc.CapabilitiesRequest(offset)
+			if code := darwinWrite(service, request); code != 0 {
+				lastErr = fmt.Errorf("write request: IOKit error 0x%08x", uint32(code))
+				continue
+			}
+			b.sleep(200 * time.Millisecond)
+
+			reply := make([]byte, 38)
+			code := C.IOAVServiceReadI2C(
+				service,
+				C.uint32_t(ddc.DisplayAddress),
+				C.uint32_t(ddc.HostSourceAddress),
+				unsafe.Pointer(&reply[0]),
+				C.uint32_t(len(reply)),
+			)
+			if code != 0 {
+				lastErr = fmt.Errorf("read reply: IOKit error 0x%08x", uint32(code))
+				continue
+			}
+			fragment, err := ddc.ParseCapabilitiesReply(reply, offset)
+			if err == nil {
+				b.sleep(50 * time.Millisecond)
+				return fragment, nil
+			}
+			lastErr = err
+			b.sleep(100 * time.Millisecond)
+		}
+		return nil, fmt.Errorf("capabilities offset %d failed after 3 attempts: %w", offset, lastErr)
+	})
+	if err != nil {
+		return nil, err
+	}
+	inputs, err := inputsFromCapabilities(capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("parse monitor input capabilities: %w", err)
+	}
+	return inputs, nil
 }
 
 func (b *NativeBackend) requireSelection() error {

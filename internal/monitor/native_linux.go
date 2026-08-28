@@ -18,7 +18,11 @@ import (
 	"github.com/dyike/monux/internal/ddc"
 )
 
-const i2cSlave = 0x0703
+const (
+	i2cRetries = 0x0701
+	i2cTimeout = 0x0702
+	i2cSlave   = 0x0703
+)
 
 type NativeBackend struct {
 	bus   int
@@ -52,20 +56,27 @@ func (b *NativeBackend) CurrentInput() (Input, error) {
 	}
 	defer file.Close()
 
-	if _, err := file.Write(ddc.GetVCPRequest(ddc.VCPInputSource)); err != nil {
-		return 0, fmt.Errorf("write DDC/CI request to bus %d: %w", b.bus, err)
-	}
-	b.sleep(40 * time.Millisecond)
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if _, err := file.Write(ddc.GetVCPRequest(ddc.VCPInputSource)); err != nil {
+			lastErr = fmt.Errorf("write request: %w", err)
+			continue
+		}
+		b.sleep(40 * time.Millisecond)
 
-	reply := make([]byte, 11)
-	if _, err := io.ReadFull(file, reply); err != nil {
-		return 0, fmt.Errorf("read DDC/CI reply from bus %d: %w", b.bus, err)
+		reply := make([]byte, 11)
+		if _, err := io.ReadFull(file, reply); err != nil {
+			lastErr = fmt.Errorf("read reply: %w", err)
+			continue
+		}
+		value, err := ddc.ParseVCPReply(reply, ddc.VCPInputSource)
+		if err == nil {
+			return Input(value.Current), nil
+		}
+		lastErr = err
+		b.sleep(100 * time.Millisecond)
 	}
-	value, err := ddc.ParseVCPReply(reply, ddc.VCPInputSource)
-	if err != nil {
-		return 0, fmt.Errorf("parse input-source reply from bus %d: %w", b.bus, err)
-	}
-	return Input(value.Current), nil
+	return 0, fmt.Errorf("read input source failed after 3 attempts on bus %d: %w", b.bus, lastErr)
 }
 
 func (b *NativeBackend) SetInput(input Input) error {
@@ -85,6 +96,54 @@ func (b *NativeBackend) SetInput(input Input) error {
 	return nil
 }
 
+func (b *NativeBackend) SupportedInputs() ([]Input, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	file, err := b.openBus()
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	capabilities, err := ddc.ReadCapabilities(func(offset uint16) ([]byte, error) {
+		var lastErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			if _, err := file.Write(ddc.CapabilitiesRequest(offset)); err != nil {
+				lastErr = fmt.Errorf("write request: %w", err)
+				continue
+			}
+			// Capabilities replies take substantially longer than ordinary VCP
+			// replies on many monitors.
+			b.sleep(200 * time.Millisecond)
+
+			reply := make([]byte, 38)
+			count, err := file.Read(reply)
+			if err != nil {
+				lastErr = fmt.Errorf("read reply: %w", err)
+				continue
+			}
+			fragment, err := ddc.ParseCapabilitiesReply(reply[:count], offset)
+			if err == nil {
+				b.sleep(50 * time.Millisecond)
+				return fragment, nil
+			}
+			lastErr = err
+			b.sleep(100 * time.Millisecond)
+		}
+		return nil, fmt.Errorf("capabilities offset %d failed after 3 attempts on bus %d: %w", offset, b.bus, lastErr)
+	})
+	if err != nil {
+		b.sleep(200 * time.Millisecond)
+		return nil, err
+	}
+	inputs, err := inputsFromCapabilities(capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("parse input capabilities from bus %d: %w", b.bus, err)
+	}
+	return inputs, nil
+}
+
 func (b *NativeBackend) openBus() (*os.File, error) {
 	if b.bus < 0 {
 		return nil, errors.New("monitor.id is required; run monux detect and configure its I2C bus number")
@@ -98,6 +157,14 @@ func (b *NativeBackend) openBus() (*os.File, error) {
 	if errno != 0 {
 		file.Close()
 		return nil, fmt.Errorf("select DDC/CI address 0x%02x on %s: %w", ddc.DisplayAddress, path, errno)
+	}
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(), i2cTimeout, 100); errno != 0 {
+		file.Close()
+		return nil, fmt.Errorf("set 1 second I2C timeout on %s: %w", path, errno)
+	}
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(), i2cRetries, 2); errno != 0 {
+		file.Close()
+		return nil, fmt.Errorf("set I2C retries on %s: %w", path, errno)
 	}
 	return file, nil
 }

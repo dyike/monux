@@ -2,7 +2,14 @@
 // protocol. Platform backends are responsible only for transporting frames.
 package ddc
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
 
 const (
 	DisplayAddress     = 0x37
@@ -10,10 +17,14 @@ const (
 	VirtualHostAddress = 0x50
 	VCPInputSource     = 0x60
 
-	opGetVCP      = 0x01
-	opGetVCPReply = 0x02
-	opSetVCP      = 0x03
+	opGetVCP              = 0x01
+	opGetVCPReply         = 0x02
+	opSetVCP              = 0x03
+	opCapabilitiesRequest = 0xf3
+	opCapabilitiesReply   = 0xe3
 )
+
+var inputCapabilityPattern = regexp.MustCompile(`(?i)\b60\s*\(([^)]*)\)`)
 
 type VCPValue struct {
 	Code    byte
@@ -30,6 +41,11 @@ func GetVCPRequest(code byte) []byte {
 // SetVCPRequest returns the bytes written to the display's 7-bit I2C address.
 func SetVCPRequest(code byte, value uint16) []byte {
 	return hostMessage([]byte{opSetVCP, code, byte(value >> 8), byte(value)})
+}
+
+// CapabilitiesRequest requests a fragment of the monitor capabilities string.
+func CapabilitiesRequest(offset uint16) []byte {
+	return hostMessage([]byte{opCapabilitiesRequest, byte(offset >> 8), byte(offset)})
 }
 
 func hostMessage(data []byte) []byte {
@@ -67,6 +83,87 @@ func ParseVCPReply(reply []byte, requestedCode byte) (VCPValue, error) {
 		Maximum: uint16(reply[6])<<8 | uint16(reply[7]),
 		Current: uint16(reply[8])<<8 | uint16(reply[9]),
 	}, nil
+}
+
+// ParseCapabilitiesReply returns one capabilities-string fragment.
+func ParseCapabilitiesReply(reply []byte, requestedOffset uint16) ([]byte, error) {
+	if len(reply) < 6 {
+		return nil, fmt.Errorf("DDC/CI capabilities reply is too short: got %d bytes", len(reply))
+	}
+	length := int(reply[1] & 0x7f)
+	if length < 3 {
+		return nil, fmt.Errorf("invalid capabilities payload length %d", length)
+	}
+	total := length + 3
+	if len(reply) < total {
+		return nil, fmt.Errorf("truncated capabilities reply: got %d bytes, want %d", len(reply), total)
+	}
+	if reply[0] != 0x6e || reply[2] != opCapabilitiesReply {
+		return nil, fmt.Errorf("unexpected capabilities reply header % x", reply[:3])
+	}
+	offset := uint16(reply[3])<<8 | uint16(reply[4])
+	if offset != requestedOffset {
+		return nil, fmt.Errorf("capabilities reply offset %d, requested %d", offset, requestedOffset)
+	}
+	if checksum(VirtualHostAddress, reply[:total]) != 0 {
+		return nil, fmt.Errorf("invalid DDC/CI capabilities reply checksum")
+	}
+	return append([]byte(nil), reply[5:total-1]...), nil
+}
+
+// ParseInputCapabilities extracts the values listed for VCP 0x60 from a
+// monitor capabilities string.
+func ParseInputCapabilities(capabilities string) ([]uint16, error) {
+	matches := inputCapabilityPattern.FindStringSubmatch(capabilities)
+	if len(matches) != 2 {
+		return nil, fmt.Errorf("capabilities string does not report values for VCP 0x60")
+	}
+	seen := make(map[uint16]bool)
+	values := make([]uint16, 0)
+	for _, field := range strings.Fields(matches[1]) {
+		field = strings.TrimPrefix(strings.ToLower(field), "0x")
+		value, err := strconv.ParseUint(field, 16, 16)
+		if err != nil {
+			continue
+		}
+		input := uint16(value)
+		if !seen[input] {
+			seen[input] = true
+			values = append(values, input)
+		}
+	}
+	if len(values) == 0 {
+		return nil, fmt.Errorf("capabilities string reports an empty VCP 0x60 value list")
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	return values, nil
+}
+
+// ReadCapabilities joins the offset-based fragments returned by a display.
+// The display terminates its capabilities string with a NUL byte.
+func ReadCapabilities(readFragment func(offset uint16) ([]byte, error)) (string, error) {
+	const maximumLength = 16 * 1024
+
+	capabilities := make([]byte, 0, 512)
+	for len(capabilities) < maximumLength {
+		offset := uint16(len(capabilities))
+		fragment, err := readFragment(offset)
+		if err != nil {
+			return "", err
+		}
+		if end := bytes.IndexByte(fragment, 0); end >= 0 {
+			capabilities = append(capabilities, fragment[:end]...)
+			return string(capabilities), nil
+		}
+		if len(fragment) == 0 {
+			return "", fmt.Errorf("display returned an empty capabilities fragment at offset %d", offset)
+		}
+		if len(capabilities)+len(fragment) > maximumLength {
+			return "", fmt.Errorf("monitor capabilities string exceeds %d bytes", maximumLength)
+		}
+		capabilities = append(capabilities, fragment...)
+	}
+	return "", fmt.Errorf("monitor capabilities string is not NUL-terminated")
 }
 
 func checksum(initial byte, data []byte) byte {

@@ -1,6 +1,10 @@
 package monitor
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/dyike/monux/internal/ddc"
+)
 
 // Input is the value written to VCP feature 0x60 (Input Source).
 type Input uint16
@@ -24,4 +28,17 @@ type Display struct {
 type Backend interface {
 	Controller
 	Detect() ([]Display, error)
+	SupportedInputs() ([]Input, error)
+}
+
+func inputsFromCapabilities(capabilities string) ([]Input, error) {
+	values, err := ddc.ParseInputCapabilities(capabilities)
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]Input, len(values))
+	for i, value := range values {
+		inputs[i] = Input(value)
+	}
+	return inputs, nil
 }

@@ -2,24 +2,115 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dyike/monux/internal/monitor"
 )
 
 type fakeBackend struct {
-	current  monitor.Input
-	displays []monitor.Display
+	current      monitor.Input
+	currentErr   error
+	displays     []monitor.Display
+	supported    []monitor.Input
+	supportedErr error
 }
 
-func (f *fakeBackend) CurrentInput() (monitor.Input, error) { return f.current, nil }
+func (f *fakeBackend) CurrentInput() (monitor.Input, error) { return f.current, f.currentErr }
 func (f *fakeBackend) SetInput(input monitor.Input) error {
 	f.current = input
 	return nil
 }
 func (f *fakeBackend) Detect() ([]monitor.Display, error) { return f.displays, nil }
+func (f *fakeBackend) SupportedInputs() ([]monitor.Input, error) {
+	return f.supported, f.supportedErr
+}
+
+func TestInputsCommand(t *testing.T) {
+	configPath := prepareCLI(t)
+	backend := useFakeBackend(t)
+	backend.current = 0x11
+	backend.supported = []monitor.Input{0x0f, 0x11, 0x12}
+
+	cmd := newRootCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"--config", configPath, "inputs"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
+	}
+	for _, want := range []string{
+		"VALUE", "CONNECTOR", "REPORTED", "CURRENT", "NAME",
+		"0x0f", "DisplayPort 1", "linux",
+		"0x11", "HDMI 1", "mac",
+		"0x12", "HDMI 2",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output does not contain %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestInputsCommandFallsBackToConfig(t *testing.T) {
+	configPath := prepareCLI(t)
+	backend := useFakeBackend(t)
+	backend.currentErr = errors.New("read failed")
+	backend.supportedErr = errors.New("unsupported")
+
+	cmd := newRootCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"--config", configPath, "inputs"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
+	}
+	for _, want := range []string{"warning: could not read monitor input capabilities", "0x0f", "linux", "unknown"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output does not contain %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestInputsCommandAutoDetectsWithoutConfig(t *testing.T) {
+	backend := useFakeBackend(t)
+	backend.current = 0x11
+	backend.supported = []monitor.Input{0x0f, 0x11}
+	backend.displays = []monitor.Display{{ID: "15", Name: "Dell P2415Q"}}
+
+	cmd := newRootCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"--config", filepath.Join(t.TempDir(), "missing.yaml"), "inputs"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
+	}
+	for _, want := range []string{"0x0f", "DisplayPort 1", "0x11", "HDMI 1"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output does not contain %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestInputsCommandRequiresSelectionForMultipleDetectedMonitors(t *testing.T) {
+	backend := useFakeBackend(t)
+	backend.displays = []monitor.Display{{ID: "15"}, {ID: "16"}}
+
+	cmd := newRootCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"--config", filepath.Join(t.TempDir(), "missing.yaml"), "inputs"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "2 monitors were detected") {
+		t.Fatalf("Execute() error = %v, want multiple-monitor selection error", err)
+	}
+}
 
 func TestStatusCommand(t *testing.T) {
 	configPath := prepareCLI(t)
