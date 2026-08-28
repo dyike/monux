@@ -1,0 +1,8 @@
+monitor:
+  # Find this number with: monux detect
+  bus: 15
+
+inputs:
+  # Common values for a Dell P2415Q. Confirm them for your cabling/display.
+  mac: 0x11
+  linux: 0x0f
