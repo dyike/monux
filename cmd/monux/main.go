@@ -57,6 +57,7 @@ func newInitCommand(configPath *string) *cobra.Command {
 	var monitorID string
 	currentName := defaultLocalInputName()
 	var configuredInputs []string
+	var configuredPeers []string
 	command := &cobra.Command{
 		Use:   "init",
 		Short: "Detect the monitor and generate or refresh the configuration",
@@ -101,6 +102,13 @@ func newInitCommand(configPath *string) *cobra.Command {
 				}
 				cfg.Inputs[name] = input
 			}
+			for _, mapping := range configuredPeers {
+				name, peerURL, err := parseConfiguredPeer(mapping)
+				if err != nil {
+					return err
+				}
+				upsertPeer(&cfg, name, peerURL)
+			}
 			if currentErr == nil && !hasInputValue(cfg.Inputs, current) {
 				name := uniqueInputName(currentName, cfg.Inputs)
 				cfg.Inputs[name] = current
@@ -138,6 +146,9 @@ func newInitCommand(configPath *string) *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", action, *configPath)
 			fmt.Fprintf(cmd.OutOrStdout(), "monitor: %s (%s)\n", display.ID, display.Name)
 			printConfiguredInputs(cmd, cfg.Inputs, current, currentErr)
+			for _, peer := range cfg.Peers {
+				fmt.Fprintf(cmd.OutOrStdout(), "peer: %s=%s\n", peer.Name, peer.URL)
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "note: a monitor reports connector values, not the operating system connected to each port")
 			return nil
 		},
@@ -145,6 +156,7 @@ func newInitCommand(configPath *string) *cobra.Command {
 	command.Flags().StringVar(&monitorID, "monitor", "", "monitor ID to use when more than one is detected")
 	command.Flags().StringVar(&currentName, "current-name", currentName, "name assigned to the current input when it is not configured")
 	command.Flags().StringArrayVar(&configuredInputs, "input", nil, "named input mapping in name=value form (repeatable)")
+	command.Flags().StringArrayVar(&configuredPeers, "peer", nil, "peer mapping in name=url form (repeatable)")
 	return command
 }
 
@@ -196,6 +208,26 @@ func parseConfiguredInput(mapping string) (string, monitor.Input, error) {
 		return "", 0, fmt.Errorf("invalid --input %q: %w", mapping, err)
 	}
 	return name, input, nil
+}
+
+func parseConfiguredPeer(mapping string) (string, string, error) {
+	name, peerURL, found := strings.Cut(mapping, "=")
+	name = strings.TrimSpace(name)
+	peerURL = strings.TrimSpace(peerURL)
+	if !found || name == "" || peerURL == "" {
+		return "", "", fmt.Errorf("invalid --peer %q: use name=url (for example mac=http://192.168.5.82:8765)", mapping)
+	}
+	return name, peerURL, nil
+}
+
+func upsertPeer(cfg *config.Config, name, peerURL string) {
+	for index := range cfg.Peers {
+		if cfg.Peers[index].Name == name {
+			cfg.Peers[index].URL = peerURL
+			return
+		}
+	}
+	cfg.Peers = append(cfg.Peers, config.PeerConfig{Name: name, URL: peerURL})
 }
 
 func hasInputValue(inputs map[string]monitor.Input, wanted monitor.Input) bool {

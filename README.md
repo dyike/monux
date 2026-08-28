@@ -120,6 +120,12 @@ is connected to a port, so supply known remote names during initialization:
 monux init --input mac=hdmi-1 --input linux=displayport-1
 ```
 
+Add or update a peer without editing YAML directly:
+
+```bash
+monux init --peer mac=http://192.168.5.82:8765
+```
+
 Repeat `--input name=value` as needed. With multiple detected monitors, select
 one explicitly:
 

@@ -200,6 +200,52 @@ func TestInitCommandAcceptsNamedInputOverrides(t *testing.T) {
 	}
 }
 
+func TestInitCommandAddsAndUpdatesPeers(t *testing.T) {
+	configPath := prepareCLI(t)
+	backend := useFakeBackend(t)
+	backend.displays = []monitor.Display{{ID: "23", Name: "Dell P2415Q"}}
+	backend.current = 0x0f
+	backend.supported = []monitor.Input{0x0f, 0x11}
+
+	cmd := newRootCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs([]string{"--config", configPath, "init", "--peer", "mac=http://192.168.5.82:8765"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output = %s", err, output.String())
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Node.Name != defaultLocalInputName() || len(cfg.Peers) != 1 || cfg.Peers[0].Name != "mac" || cfg.Peers[0].URL != "http://192.168.5.82:8765" {
+		t.Fatalf("generated node/peers = %#v, %#v", cfg.Node, cfg.Peers)
+	}
+	if !strings.Contains(output.String(), "peer: mac=http://192.168.5.82:8765") {
+		t.Fatalf("output = %s", output.String())
+	}
+
+	cfg.Peers[0].Token = "keep-me"
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	cmd = newRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--config", configPath, "init", "--peer", "mac=http://mac.local:8765"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Peers) != 1 || cfg.Peers[0].URL != "http://mac.local:8765" || cfg.Peers[0].Token != "keep-me" {
+		t.Fatalf("updated peers = %#v", cfg.Peers)
+	}
+}
+
 func TestInitCommandRequiresMonitorSelection(t *testing.T) {
 	backend := useFakeBackend(t)
 	backend.displays = []monitor.Display{{ID: "15", Name: "First"}, {ID: "23", Name: "Second"}}
