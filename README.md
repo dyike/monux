@@ -42,6 +42,11 @@ Platform files only perform discovery and transport.
 See [platform support](docs/platform-support.md) for implementation details and
 current hardware-validation status.
 
+An optional Omarchy bar plugin lives in
+[`plugins/omarchy`](plugins/omarchy). It keeps the CLI as the control
+backend and adds current-input status plus click-to-switch behavior to the top
+bar.
+
 ## Build
 
 Go 1.24 or newer is required to build from source.

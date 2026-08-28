@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "id": "dyike.monux",
+  "name": "Monux monitor switcher",
+  "version": "1.1.2",
+  "author": "monux",
+  "license": "MIT",
+  "description": "Native-style monitor input panel with status, information, and named Monux switching.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Monux.qml"
+  },
+  "barWidget": {
+    "displayName": "Monux monitor switcher",
+    "description": "Open a native-style panel with Inputs and Info tabs; right click refreshes.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "executable": "monux",
+      "configPath": "",
+      "primaryInput": "linux",
+      "secondaryInput": "mac",
+      "refreshIntervalSec": 10,
+      "showLabel": true
+    },
+    "schema": [
+      {
+        "key": "executable",
+        "type": "string",
+        "label": "Monux executable",
+        "defaultValue": "monux"
+      },
+      {
+        "key": "configPath",
+        "type": "string",
+        "label": "Configuration path",
+        "defaultValue": ""
+      },
+      {
+        "key": "primaryInput",
+        "type": "string",
+        "label": "Primary input name",
+        "defaultValue": "linux"
+      },
+      {
+        "key": "secondaryInput",
+        "type": "string",
+        "label": "Secondary input name",
+        "defaultValue": "mac"
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 5,
+        "max": 3600,
+        "step": 5,
+        "defaultValue": 10
+      },
+      {
+        "key": "showLabel",
+        "type": "boolean",
+        "label": "Show input name",
+        "defaultValue": true
+      }
+    ]
+  }
+}
