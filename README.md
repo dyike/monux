@@ -96,7 +96,7 @@ The first column is the platform-local monitor identifier used by
 The default per-user configuration path is:
 
 - Linux: `~/.config/monux/config.yaml`
-- macOS: `~/Library/Application Support/monux/config.yaml`
+- macOS: `~/.config/monux/config.yaml`
 - Windows: `%AppData%\monux\config.yaml`
 
 Generate the configuration on each computer while the monitor is showing that

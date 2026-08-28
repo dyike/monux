@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -241,8 +242,17 @@ func DefaultPath() string {
 	if path := os.Getenv("MONUX_CONFIG"); path != "" {
 		return path
 	}
-	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "monux", "config.yaml")
+	home, _ := os.UserHomeDir()
+	configDir, _ := os.UserConfigDir()
+	return defaultPathForPlatform(runtime.GOOS, home, configDir)
+}
+
+func defaultPathForPlatform(platform, home, configDir string) string {
+	if platform == "darwin" && home != "" {
+		return filepath.Join(home, ".config", "monux", "config.yaml")
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, "monux", "config.yaml")
 	}
 	return "config.yaml"
 }

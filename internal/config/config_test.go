@@ -117,3 +117,29 @@ func TestSavePreservesExistingPermissions(t *testing.T) {
 		t.Fatalf("mode = %o, want 640", got)
 	}
 }
+
+func TestDefaultPathForPlatform(t *testing.T) {
+	tests := []struct {
+		platform  string
+		home      string
+		configDir string
+		want      string
+	}{
+		{"darwin", "/Users/monux", "/Users/monux/Library/Application Support", "/Users/monux/.config/monux/config.yaml"},
+		{"linux", "/home/monux", "/home/monux/.config", "/home/monux/.config/monux/config.yaml"},
+		{"windows", `C:\\Users\\monux`, `C:\\Users\\monux\\AppData\\Roaming`, `C:\\Users\\monux\\AppData\\Roaming/monux/config.yaml`},
+	}
+	for _, test := range tests {
+		if got := defaultPathForPlatform(test.platform, test.home, test.configDir); got != test.want {
+			t.Errorf("defaultPathForPlatform(%q) = %q, want %q", test.platform, got, test.want)
+		}
+	}
+}
+
+func TestDefaultPathHonorsEnvironment(t *testing.T) {
+	want := filepath.Join(t.TempDir(), "custom.yaml")
+	t.Setenv("MONUX_CONFIG", want)
+	if got := DefaultPath(); got != want {
+		t.Fatalf("DefaultPath() = %q, want %q", got, want)
+	}
+}
