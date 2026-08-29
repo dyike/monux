@@ -207,11 +207,11 @@ VALUE  CONNECTOR      REPORTED  CURRENT  NAME
 0x11   HDMI 1         yes       yes      mac
 ```
 
-`REPORTED=yes` means the value came from the monitor's DDC/CI capabilities
+`REPORTED=yes` means the raw value came from the monitor's DDC/CI capabilities
 string. `CURRENT=yes` is the input currently selected by VCP `0x60`. `NAME`
-comes from the local YAML configuration. The connector label is the standard
-meaning of the value; monitor firmware may use a vendor-specific value, which
-is shown as `Unknown` rather than guessed.
+comes from the local YAML configuration. `CONNECTOR` is Monux's interpretation
+of the value, not a physical-port name reported by the monitor. Standard MCCS
+values have stable labels; unknown vendor values remain usable by number.
 
 If a monitor or connection cannot return a capabilities string, the command
 prints a warning and still lists configured values with `REPORTED=unknown`.
@@ -231,7 +231,7 @@ monux set displayport-1
 monux serve
 ```
 
-Common MCCS input-source values are:
+MCCS 2.2a standardizes these commonly used input-source values:
 
 | Connector | Hex | Decimal |
 | --- | ---: | ---: |
@@ -239,10 +239,20 @@ Common MCCS input-source values are:
 | DisplayPort 2 | `0x10` | 16 |
 | HDMI 1 | `0x11` | 17 |
 | HDMI 2 | `0x12` | 18 |
-| USB-C | `0x1b` | 27 |
 
-Monitor firmware can use different or vendor-specific values. Use
-`monux inputs` on each connected machine before relying on automation.
+> [!IMPORTANT]
+> USB-C has no portable VCP `0x60` value in MCCS 2.2a. Some monitors use
+> `0x1b` (27), while others use a different vendor value or expose USB-C as a
+> DisplayPort input. Treat Monux's `USB-C` label for `0x1b` as a compatibility
+> hint, not proof that the physical connector is USB-C.
+
+Input discovery is per monitor and best-effort. `monux inputs` reads the raw
+values advertised by the selected monitor, including vendor-specific values,
+but it cannot determine which computer or operating system is connected to
+each port. Run it on every connected computer and assign user-facing names in
+the configuration. If the monitor, GPU, dock, adapter, or inactive input path
+does not return a capabilities string, Monux warns and falls back to configured
+or cached values; those fallback values are not detected results.
 
 On the validated Dell P2415Q, the monitor reports `0x0f`, `0x10`, and `0x11`.
 Its second DisplayPort value corresponds to the monitor's second DP-family
