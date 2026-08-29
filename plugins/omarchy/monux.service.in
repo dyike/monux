@@ -1,0 +1,16 @@
+[Unit]
+Description=Monux monitor control HTTP service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+@TOKEN_ENV@
+ExecStart=@EXECUTABLE@ --config @CONFIG@ serve --listen @LISTEN@
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

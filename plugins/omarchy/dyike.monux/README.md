@@ -62,6 +62,45 @@ The installer copies this directory to
 `omarchy.monitor`. If the shell is running, the installer uses Omarchy's guarded
 restart command so Quickshell cannot keep an older cached widget.
 
+The installer also writes `~/.config/systemd/user/monux.service`, enables it
+for the user session, and starts or restarts it immediately. The service uses
+the same executable and configuration as the widget and listens on
+`0.0.0.0:8765` by default so a configured Mac peer can reach Linux. The QML
+widget itself does not spawn or supervise the HTTP server.
+
+When the same installed Monux executable already has a user-owned foreground
+`serve` process on that port, the installer stops that exact process and
+migrates it to `monux.service`. It never terminates an unrelated executable;
+other port conflicts stop installation with the listener details.
+
+Installation variables for the service:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `MONUX_INSTALL_SERVER` | Set to `0` or `false` to skip the user service | `1` |
+| `MONUX_HTTP_LISTEN` | Service listen address | `0.0.0.0:8765` |
+| `MONUX_HTTP_TOKEN` | Incoming Bearer token stored in the user unit | empty |
+
+An empty token exposes monitor switching to the local network. That is only
+appropriate on a trusted LAN. To install with authentication:
+
+```bash
+MONUX_HTTP_TOKEN='replace-with-a-shared-secret' \
+  ./plugins/omarchy/install.sh
+```
+
+Configure the same value as the peer's `token`. Inspect or restart the service
+with:
+
+```bash
+systemctl --user status monux.service
+systemctl --user restart monux.service
+journalctl --user -u monux.service
+```
+
+The server loads configuration at startup. Restart `monux.service` after
+manually editing peers or inputs outside the installer.
+
 Configure plugin settings in `~/.config/omarchy/shell.json`, for example:
 
 ```json

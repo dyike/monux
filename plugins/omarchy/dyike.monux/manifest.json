@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "dyike.monux",
   "name": "Monux monitor switcher",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "monux",
   "license": "MIT",
   "description": "Native-style monitor input panel with status, information, and named Monux switching.",

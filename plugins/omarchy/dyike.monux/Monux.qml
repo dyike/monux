@@ -422,7 +422,7 @@ Panel {
             fontFamily: root.bar.fontFamily
           }
 
-          InfoRow { label: "Transport"; value: "Local DDC/CI" }
+          InfoRow { label: "Transport"; value: "Local DDC + peer fallback" }
           InfoRow { label: "Input reading"; value: root.statusWarning === "" ? "Available" : "Unavailable" }
           InfoRow { label: "Current value"; value: root.currentInput !== "" ? root.currentInput : "Unknown" }
           InfoRow { label: "Refresh"; value: root.refreshIntervalSec + " seconds" }
