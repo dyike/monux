@@ -12,12 +12,27 @@ access.
 ## Topology
 
 ```text
-macOS + monux ──── USB-C/DisplayPort/HDMI ──┐
-Linux + monux ──── DisplayPort/HDMI ────────┼── Monitor
-Windows + monux ── DisplayPort/HDMI ────────┘
+                    LAN / HTTP peer control
+        ┌─────────────────┬─────────────────┐
+        │                 │                 │
+        ▼                 ▼                 ▼
+macOS + Monux       Linux + Monux      Windows + Monux
+        │                 │                 │
+        │ local DDC       │ local DDC       │ local DDC
+        │ over video      │ over video      │ over video
+        └─────────────────┼─────────────────┘
+                          ▼
+                       Monitor
+                (one active video input)
 ```
 
-From any installed machine:
+The solid vertical paths are the video connections that carry local DDC/CI.
+The LAN control plane exists only between configured peers whose HTTP servers
+are running; it is optional for local-only use. In the validated setup, the
+monitor may accept DDC only through its active video input.
+
+With reciprocal peer configuration, the same commands can be sent from any
+installed machine:
 
 ```bash
 monux switch mac
@@ -343,6 +358,25 @@ curl -X POST \
   http://<linux-ip>:8765/api/v1/switch/linux
 ```
 
+The request follows this path:
+
+```text
+Client               Linux node                 Mac node              Monitor
+  │                       │                         │                     │
+  │ POST /switch/linux    │                         │                     │
+  ├──────────────────────▶│                         │                     │
+  │                       │ local DDC: set 0x0f     │                     │
+  │                       ├───────────╳ fails       │                     │
+  │                       │                         │                     │
+  │                       │ POST /local/set/0x0f    │                     │
+  │                       ├────────────────────────▶│                     │
+  │                       │                         │ local DDC: set 0x0f │
+  │                       │                         ├────────────────────▶│
+  │                       │                         │     input → Linux   │
+  │                       │◀────────── 200 OK ──────┤                     │
+  │◀──────── 200 OK ──────┤                         │                     │
+```
+
 Peer calls use local-only endpoints that never forward again, preventing
 routing loops. Peer requests time out after three seconds and report local and
 remote failures separately.
@@ -383,20 +417,26 @@ same-endpoint handoff therefore verifies peer routing, not inactive-input DDC.
 ## Architecture
 
 ```text
-CLI
- │
- ▼
-Switcher ── named inputs ◀── HTTP API
- │
- ▼
-PeerController
- ├── local monitor.Controller
- │    ├── native_linux.go  ── DDC/CI over /dev/i2c
- │    ├── native_windows.go ─ Win32 physical monitor API
- │    └── native_darwin.go ── IOKit IOAVService
- └── configured peer ── authenticated local-only HTTP API
+CLI ────────────────┐
+                    ├──▶ Switcher ── named inputs ──▶ PeerController
+Public HTTP API ────┘                                  │
+                                                       ├──▶ local monitor.Controller
+                                                       │     └──▶ native backend ──▶ Monitor
+                                                       │
+                                                       └──▶ outbound peer HTTP request
+                                                             │
+                                                             ▼
+Remote local-only API ── /local/status, /local/set ──▶ remote monitor.Controller
+                                                             │
+                                                             └──▶ remote native backend ──▶ Monitor
 ```
 
 The service layer does not know which operating system it is running on. Input
 capabilities are exposed by the platform-native `monitor.Backend`; switching
-stays behind `monitor.Controller`, while protocol tests stay portable.
+stays behind `monitor.Controller`, while protocol tests stay portable. Remote
+local-only endpoints call the remote controller directly instead of another
+`PeerController`, so peer requests cannot form a forwarding loop.
+
+## License
+
+Monux is open source software released under the [MIT License](LICENSE).
