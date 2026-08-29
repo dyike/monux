@@ -48,6 +48,10 @@ An optional Omarchy bar plugin lives in
 backend and adds current-input status plus click-to-switch behavior to the top
 bar. Its installer also enables a systemd user service for peer HTTP requests.
 
+A native macOS menu bar app lives in [`plugins/macos`](plugins/macos). It
+packages the CLI as a private helper, lists every configured input, shows the
+current input, and starts automatically through a per-user LaunchAgent.
+
 ## Build
 
 Go 1.24 or newer is required to build from source.

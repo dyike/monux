@@ -59,14 +59,17 @@ Risks and follow-up work:
 
 ## macOS
 
-Status: source implementation present; it must be compiled and validated on an
-Apple Silicon Mac with the actual monitor connection.
+Status: hardware-validated on Apple Silicon with an external USB-C/DisplayPort
+monitor connection.
 
 - Uses CoreGraphics for external display detection.
+- Matches the selected CoreGraphics display to its IOMobileFramebuffer and
+  external `DCPAVServiceProxy` in the IOKit registry.
 - Uses a small project-owned CGO bridge to IOKit `IOAVService` I2C calls.
 - Uses the shared Go DDC/CI encoder and parser; it does not execute `m1ddc`.
 - Reads DDC/CI capabilities fragments through the same IOKit transport.
-- Currently supports a single external monitor selected as ID `1`.
+- Enumerates every online external display and selects one by its CoreGraphics
+  display ID as reported by `monux detect`.
 - Requires `CGO_ENABLED=1` and Apple Command Line Tools to build.
 
 Important constraints:
@@ -75,8 +78,9 @@ Important constraints:
   provided by the operating system. macOS updates can change its behavior.
 - USB-C/DisplayPort Alt Mode is the first validation target. HDMI, docks, and
   adapters require separate testing.
-- Multiple-display service-to-display matching requires additional IOKit
-  registry work before it can be considered supported.
+- CoreGraphics display IDs can change after reconnecting a display or changing
+  the display topology; rerun `monux detect` and update `monitor.id` when that
+  happens.
 - Intel macOS needs a separate IOFramebuffer/IOI2C implementation.
 
 ## Protocol core

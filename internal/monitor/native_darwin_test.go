@@ -24,3 +24,25 @@ func TestDarwinSetVCPRequestPayload(t *testing.T) {
 		t.Fatalf("darwinRequestPayload() = % x, want % x", got, want)
 	}
 }
+
+func TestNewDarwinNativeBackendAcceptsDisplayID(t *testing.T) {
+	backend, err := NewNativeBackend(" 2 ")
+	if err != nil {
+		t.Fatalf("NewNativeBackend() error = %v", err)
+	}
+	native, ok := backend.(*NativeBackend)
+	if !ok {
+		t.Fatalf("NewNativeBackend() returned %T", backend)
+	}
+	if !native.selected || native.displayID != 2 {
+		t.Fatalf("NewNativeBackend() selected = %t, displayID = %d", native.selected, native.displayID)
+	}
+}
+
+func TestNewDarwinNativeBackendRejectsInvalidDisplayID(t *testing.T) {
+	for _, id := range []string{"0", "not-a-display", "4294967296"} {
+		if _, err := NewNativeBackend(id); err == nil {
+			t.Errorf("NewNativeBackend(%q) error = nil", id)
+		}
+	}
+}
