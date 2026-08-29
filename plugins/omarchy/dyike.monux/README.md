@@ -11,6 +11,9 @@ Interactions:
 - Inputs tab: view the current name/value and switch between the three configured
   computer inputs.
 - Info tab: inspect the DDC transport, CLI/config paths, and refresh interval.
+- Settings tab: edit the three button names and refresh interval, optionally
+  show the current input name in the bar, refresh native monitor detection, or
+  restart the managed HTTP service.
 - Keyboard: `h/l` navigates tabs or choices, `j/k` changes section, Enter
   activates, `r` refreshes, and Escape closes.
 
@@ -101,6 +104,13 @@ journalctl --user -u monux.service
 The server loads configuration at startup. Restart `monux.service` after
 manually editing peers or inputs outside the installer.
 
+The Settings tab writes display preferences to the plugin's existing entry in
+`~/.config/omarchy/shell.json`. Its Detect action runs `monux init`, which
+preserves configured input names and peers while refreshing the platform-local
+monitor identifier, then restarts `monux.service`. Connector mappings, peer
+URLs, and peer tokens remain in `~/.config/monux/config.yaml` and should be
+changed atomically with `monux init --input ...` or `monux init --peer ...`.
+
 Configure plugin settings in `~/.config/omarchy/shell.json`, for example:
 
 ```json
@@ -112,7 +122,7 @@ Configure plugin settings in `~/.config/omarchy/shell.json`, for example:
   "secondaryInput": "mac",
   "tertiaryInput": "windows",
   "refreshIntervalSec": 10,
-  "showLabel": true
+  "showLabel": false
 }
 ```
 

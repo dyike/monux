@@ -10,7 +10,7 @@ peers:
 monitor:
   # Platform-local identifier reported by: monux detect
   # Linux uses an I2C bus number; macOS and Windows use a display number.
-  id: "15"
+  id: "23"
 
 inputs:
   # Labels identify the computers connected to these monitor inputs.

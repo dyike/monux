@@ -5,8 +5,9 @@ Windows. The same Go CLI is installed on every machine, and each installation
 talks to the monitor locally through its own video connection.
 
 There is no SSH, daemon, network dependency, `ddcutil`, or `m1ddc` runtime
-dependency for local CLI use. The optional built-in HTTP server can expose the
-same switcher to another computer or an ESP32.
+dependency for local-only CLI use. The built-in HTTP server is optional for
+local control and required when another Monux node or an ESP32 needs network
+access.
 
 ## Topology
 
@@ -45,7 +46,7 @@ current hardware-validation status.
 An optional Omarchy bar plugin lives in
 [`plugins/omarchy`](plugins/omarchy). It keeps the CLI as the control
 backend and adds current-input status plus click-to-switch behavior to the top
-bar.
+bar. Its installer also enables a systemd user service for peer HTTP requests.
 
 ## Build
 
@@ -231,8 +232,8 @@ socket label itself.
 
 ## HTTP API
 
-The HTTP server runs in the foreground and uses the same configuration and
-native monitor backend as the CLI:
+When started directly, the HTTP server runs in the foreground and uses the same
+configuration and native monitor backend as the CLI:
 
 ```bash
 monux serve
@@ -278,20 +279,9 @@ the loopback-only server behind a TLS reverse proxy on an untrusted network.
 
 `GET /healthz` remains unauthenticated so a supervisor can check process
 health. DDC operations from concurrent HTTP requests are serialized. The
-server handles `SIGINT` and `SIGTERM` with a graceful shutdown; use systemd,
-launchd, or another platform supervisor when it should run as a daemon.
-
-After switching from Linux to Mac, the most reliable way to switch back is to
-call the server running on the currently displayed Mac:
-
-```bash
-curl -X POST http://127.0.0.1:8765/api/v1/switch/linux
-```
-
-For an ESP32, use the Mac's LAN address and Bearer token instead. Run `monux`
-on both computers: Linux handles the request while Linux is displayed, and Mac
-handles it while Mac is displayed. Some monitors accept DDC commands over an
-inactive input, but clients must not depend on that hardware-specific behavior.
+server handles `SIGINT` and `SIGTERM` with a graceful shutdown. Omarchy installs
+a systemd user service automatically; macOS needs a launchd job or another
+supervisor for persistent peer access.
 
 `GET /api/v1/inputs` is a fast list of configured names. The slower
 `GET /api/v1/capabilities` performs native DDC/CI discovery and merges the
@@ -334,6 +324,12 @@ MONUX_HTTP_TOKEN='replace-with-the-same-secret' \
   monux serve --listen 0.0.0.0:8765
 ```
 
+On Omarchy, `./plugins/omarchy/install.sh` installs, enables, and starts
+`~/.config/systemd/user/monux.service` with LAN listening automatically. Set
+`MONUX_HTTP_TOKEN` while installing to protect the service, or set
+`MONUX_INSTALL_SERVER=0` to skip service installation. The Mac is not managed
+by the Omarchy plugin and must run its own persistent service.
+
 For example, while Mac is displayed, a switch-back request may still be sent
 to Linux. Linux forwards it to the active Mac node:
 
@@ -370,15 +366,15 @@ denied. Running the whole program as root is not the intended setup.
 
 ## Verify the handoff
 
-1. On Linux, run `monux switch mac` and confirm that macOS appears.
-2. On the Mac, run `monux switch linux` and confirm that Linux appears.
-3. If Windows is connected, switch to it and then switch away from Windows.
-4. Repeat each direction several times before adding keyboard shortcuts.
+1. Confirm `/healthz` on both node addresses.
+2. Send `switch mac` to the Linux HTTP endpoint and confirm that macOS appears.
+3. Send `switch linux` to that same Linux endpoint. Linux DDC is now inactive,
+   so the configured Mac peer must perform the switch back.
+4. Repeat the test through the Mac endpoint after configuring its Linux peer.
+5. If Windows is connected, repeat the same handoff through its active node.
 
-Some monitors accept DDC only from the active input. Installing `monux` on
-every machine supports the normal handoff because the visible machine sends
-the command that switches away from itself. Whether an inactive machine can
-also issue a successful command is hardware-dependent.
+The Dell P2415Q accepts DDC only from the active input in this setup. Successful
+same-endpoint handoff therefore verifies peer routing, not inactive-input DDC.
 
 ## Architecture
 

@@ -92,10 +92,11 @@ HTTP `500`, and all error responses use this shape:
 
 ### `POST /api/v1/set/{value}`
 
-Sets a raw VCP `0x60` value using decimal or `0x`-prefixed hexadecimal input:
+Sets VCP `0x60` using a connector name, decimal value, or `0x`-prefixed
+hexadecimal value:
 
 ```bash
-curl -X POST http://127.0.0.1:8765/api/v1/set/0x0f
+curl -X POST http://127.0.0.1:8765/api/v1/set/displayport-1
 ```
 
 An invalid value returns HTTP `400`. Prefer named switching in normal clients;
@@ -140,3 +141,7 @@ transports do not tolerate overlapping requests.
 The server first controls the monitor locally through that machine's video
 connection. When local DDC fails and `peers` are configured, it forwards the
 operation over HTTP to a peer's local-only endpoint. It does not use SSH.
+
+Starting `monux serve` directly is a foreground operation and listens on
+`127.0.0.1:8765` by default. The Omarchy installer separately creates and
+enables `~/.config/systemd/user/monux.service`, configured for LAN access.

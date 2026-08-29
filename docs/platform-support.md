@@ -9,11 +9,12 @@ firmware, so compilation alone is not considered platform validation.
 Status: implemented and unit-tested. Detection plus VCP `0x60` read/write have
 been validated against a Dell P2415Q on the current Linux development device.
 Native capabilities discovery reports `0x0f` (DisplayPort 1), `0x10`
-(DisplayPort 2), and `0x11` (HDMI 1), and identifies `0x11` as the current
-input without invoking an external monitor-control binary.
+(DisplayPort 2), and `0x11` (HDMI 1) without invoking an external
+monitor-control binary.
 
-- Enumerates connected DRM connectors through
-  `/sys/class/drm/card*-*/ddc/i2c-dev/i2c-*`.
+- Enumerates connected DRM connectors and prefers their direct
+  `i2c-*/i2c-dev/i2c-*` DisplayPort AUX adapter. It falls back to the connector
+  `ddc/i2c-dev/i2c-*` path used by HDMI and older drivers.
 - Reads the EDID monitor-name descriptor when available.
 - Falls back to `/sys/class/i2c-dev/i2c-*` if DRM connector mapping is absent.
 - Opens `/dev/i2c-N`, selects the 7-bit DDC address `0x37`, and sends native
@@ -22,6 +23,10 @@ input without invoking an external monitor-control binary.
 - Reads offset-based DDC/CI capabilities fragments and extracts the monitor's
   declared VCP `0x60` input-source values.
 - Writes VCP input source `0x60` directly.
+- On the validated AMD/P2415Q setup, the hardware-I2C `ddc` symlink can read
+  EDID but rejects DDC/CI writes; the connector-owned AUX adapter is required.
+- The P2415Q rejects Linux DisplayPort DDC after HDMI becomes active, so
+  switching back requires the active Mac peer rather than another local retry.
 
 Risks and follow-up work:
 
