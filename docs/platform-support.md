@@ -16,6 +16,9 @@ monitor-control binary.
   `i2c-*/i2c-dev/i2c-*` DisplayPort AUX adapter. It falls back to the connector
   `ddc/i2c-dev/i2c-*` path used by HDMI and older drivers.
 - Reads the EDID monitor-name descriptor when available.
+- Remembers the selected display's EDID and, after a failed DDC operation,
+  rediscovers a DisplayPort AUX adapter that was renumbered by hotplug before
+  retrying. It never guesses when multiple connected displays match.
 - Falls back to `/sys/class/i2c-dev/i2c-*` if DRM connector mapping is absent.
 - Opens `/dev/i2c-N`, selects the 7-bit DDC address `0x37`, and sends native
   DDC/CI frames.

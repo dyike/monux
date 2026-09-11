@@ -31,6 +31,11 @@ The installer:
 3. Installs and starts
    `~/Library/LaunchAgents/com.dyike.monux.menubar.plist` so the icon returns
    at login.
+4. Installs and starts
+   `~/Library/LaunchAgents/com.dyike.monux.server.plist`, listening on the LAN
+   so another Monux node can hand a switch request back to the active Mac video
+   input. The server is supervised by launchd and returns after a login or
+   unexpected exit.
 
 The app has `LSUIElement` enabled, so it appears only in the menu bar and not
 in the Dock. It reads the ordinary `~/.config/monux/config.yaml` file and keeps
@@ -53,6 +58,10 @@ Installation variables:
 | `MONUX_APP_DIR` | Parent directory for `Monux.app` | `~/Applications` |
 | `MONUX_START_AT_LOGIN` | Set to `0` or `false` to skip the LaunchAgent | `1` |
 | `MONUX_SKIP_INIT` | Set to `1` only when configuration is managed separately | `0` |
+| `MONUX_INSTALL_SERVER` | Set to `0` or `false` to skip the peer server | `1` |
+| `MONUX_HTTP_LISTEN` | Peer server listen address | `0.0.0.0:8765` |
+| `MONUX_HTTP_TOKEN` | Optional shared bearer token for LAN requests | empty |
+| `MONUX_LOG_DIR` | Directory for the peer server log | `~/Library/Logs/Monux` |
 
 ## Uninstall
 

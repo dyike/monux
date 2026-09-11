@@ -65,7 +65,9 @@ bar. Its installer also enables a systemd user service for peer HTTP requests.
 
 A native macOS menu bar app lives in [`plugins/macos`](plugins/macos). It
 packages the CLI as a private helper, lists every configured input, shows the
-current input, and starts automatically through a per-user LaunchAgent.
+current input, and starts automatically through a per-user LaunchAgent. Its
+installer also starts a persistent peer HTTP service through a second
+LaunchAgent.
 
 ## Build
 
@@ -130,6 +132,11 @@ monux init
 capabilities, creates the parent directory, and writes the configuration. It is
 safe to rerun: existing input names are preserved, while a changed Linux I2C
 bus or other platform-local monitor ID is refreshed automatically.
+
+On Linux, DisplayPort hotplug can also renumber the connector-owned I2C adapter
+while Monux is already running. If a DDC operation fails, Monux automatically
+rediscovers the same monitor by EDID and retries on its new bus. Without an EDID,
+this fallback is used only when exactly one connected display is present.
 
 The current input is named `linux`, `mac`, or `windows` according to the local
 platform. Other discovered values are given connector names such as
@@ -309,8 +316,8 @@ the loopback-only server behind a TLS reverse proxy on an untrusted network.
 `GET /healthz` remains unauthenticated so a supervisor can check process
 health. DDC operations from concurrent HTTP requests are serialized. The
 server handles `SIGINT` and `SIGTERM` with a graceful shutdown. Omarchy installs
-a systemd user service automatically; macOS needs a launchd job or another
-supervisor for persistent peer access.
+a systemd user service automatically; the macOS plugin installs an equivalent
+LaunchAgent for persistent peer access.
 
 `GET /api/v1/inputs` is a fast list of configured names. The slower
 `GET /api/v1/capabilities` performs native DDC/CI discovery and merges the
@@ -357,7 +364,8 @@ On Omarchy, `./plugins/omarchy/install.sh` installs, enables, and starts
 `~/.config/systemd/user/monux.service` with LAN listening automatically. Set
 `MONUX_HTTP_TOKEN` while installing to protect the service, or set
 `MONUX_INSTALL_SERVER=0` to skip service installation. The Mac is not managed
-by the Omarchy plugin and must run its own persistent service.
+by the Omarchy plugin; `./plugins/macos/install.sh` installs its own persistent
+service.
 
 For example, while Mac is displayed, a switch-back request may still be sent
 to Linux. Linux forwards it to the active Mac node:

@@ -8,12 +8,17 @@ application_root="${MONUX_APP_DIR:-$HOME/Applications}"
 application_path="$application_root/Monux.app"
 launch_agents_root="${MONUX_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 launch_agent="$launch_agents_root/com.dyike.monux.menubar.plist"
+server_launch_agent="$launch_agents_root/com.dyike.monux.server.plist"
 config_path="${MONUX_CONFIG:-$HOME/.config/monux/config.yaml}"
 source_executable="${MONUX_EXECUTABLE:-}"
 start_at_login="${MONUX_START_AT_LOGIN:-1}"
 launch_application="${MONUX_LAUNCH:-1}"
 manage_launch_agent="${MONUX_MANAGE_LAUNCH_AGENT:-1}"
 skip_init="${MONUX_SKIP_INIT:-0}"
+install_server="${MONUX_INSTALL_SERVER:-1}"
+server_listen="${MONUX_HTTP_LISTEN:-0.0.0.0:8765}"
+server_token="${MONUX_HTTP_TOKEN:-}"
+logs_root="${MONUX_LOG_DIR:-$HOME/Library/Logs/Monux}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "monux macOS installer: this installer must run on macOS" >&2
@@ -78,9 +83,13 @@ fi
 
 domain="gui/$(id -u)"
 label="com.dyike.monux.menubar"
+server_label="com.dyike.monux.server"
 if [[ "$manage_launch_agent" != "0" && "$manage_launch_agent" != "false" ]]; then
   if launchctl print "$domain/$label" >/dev/null 2>&1; then
     launchctl bootout "$domain/$label"
+  fi
+  if launchctl print "$domain/$server_label" >/dev/null 2>&1; then
+    launchctl bootout "$domain/$server_label"
   fi
 
   if [[ "$start_at_login" != "0" && "$start_at_login" != "false" ]]; then
@@ -96,8 +105,41 @@ if [[ "$manage_launch_agent" != "0" && "$manage_launch_agent" != "false" ]]; the
     launchctl bootstrap "$domain" "$launch_agent"
     launchctl kickstart -k "$domain/$label"
     echo "Installed and started login item: $launch_agent"
-  elif [[ -f "$launch_agent" ]]; then
+
+    if [[ "$install_server" != "0" && "$install_server" != "false" ]]; then
+      mkdir -p "$logs_root"
+      temporary_server_agent="$temporary_root/com.dyike.monux.server.plist"
+      plutil -create xml1 "$temporary_server_agent"
+      plutil -insert Label -string "$server_label" "$temporary_server_agent"
+      plutil -insert ProgramArguments -array "$temporary_server_agent"
+      plutil -insert ProgramArguments.0 -string "$application_path/Contents/Helpers/monux" "$temporary_server_agent"
+      plutil -insert ProgramArguments.1 -string "--config" "$temporary_server_agent"
+      plutil -insert ProgramArguments.2 -string "$config_path" "$temporary_server_agent"
+      plutil -insert ProgramArguments.3 -string "serve" "$temporary_server_agent"
+      plutil -insert ProgramArguments.4 -string "--listen" "$temporary_server_agent"
+      plutil -insert ProgramArguments.5 -string "$server_listen" "$temporary_server_agent"
+      plutil -insert RunAtLoad -bool true "$temporary_server_agent"
+      plutil -insert KeepAlive -bool true "$temporary_server_agent"
+      plutil -insert ProcessType -string Background "$temporary_server_agent"
+      plutil -insert StandardOutPath -string "$logs_root/server.log" "$temporary_server_agent"
+      plutil -insert StandardErrorPath -string "$logs_root/server.log" "$temporary_server_agent"
+      if [[ -n "$server_token" ]]; then
+        plutil -insert EnvironmentVariables -dict "$temporary_server_agent"
+        plutil -insert EnvironmentVariables.MONUX_HTTP_TOKEN -string "$server_token" "$temporary_server_agent"
+      elif [[ "$server_listen" != 127.0.0.1:* && "$server_listen" != localhost:* && "$server_listen" != \[::1\]:* ]]; then
+        echo "warning: macOS Monux server will listen on $server_listen without authentication" >&2
+        echo "Set MONUX_HTTP_TOKEN when installing if this is not a trusted LAN." >&2
+      fi
+      install -m 0600 "$temporary_server_agent" "$server_launch_agent"
+      launchctl bootstrap "$domain" "$server_launch_agent"
+      launchctl kickstart -k "$domain/$server_label"
+      echo "Installed and started peer server: $server_launch_agent ($server_listen)"
+    elif [[ -f "$server_launch_agent" ]]; then
+      rm -f -- "$server_launch_agent"
+    fi
+  else
     rm -f -- "$launch_agent"
+    rm -f -- "$server_launch_agent"
   fi
 fi
 

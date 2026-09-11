@@ -25,12 +25,19 @@ const (
 )
 
 type NativeBackend struct {
-	bus   int
-	mu    sync.Mutex
-	sleep func(time.Duration)
+	bus             int
+	displayIdentity string
+	drmRoot         string
+	i2cRoot         string
+	mu              sync.Mutex
+	sleep           func(time.Duration)
 }
 
 func NewNativeBackend(id string) (Backend, error) {
+	return newNativeBackend(id, "/sys/class/drm", "/sys/class/i2c-dev")
+}
+
+func newNativeBackend(id, drmRoot, i2cRoot string) (*NativeBackend, error) {
 	bus := -1
 	if strings.TrimSpace(id) != "" {
 		parsed, err := strconv.Atoi(strings.TrimSpace(id))
@@ -39,17 +46,43 @@ func NewNativeBackend(id string) (Backend, error) {
 		}
 		bus = parsed
 	}
-	return &NativeBackend{bus: bus, sleep: time.Sleep}, nil
+	backend := &NativeBackend{
+		bus:     bus,
+		drmRoot: drmRoot,
+		i2cRoot: i2cRoot,
+		sleep:   time.Sleep,
+	}
+	backend.captureDisplayIdentity()
+	return backend, nil
 }
 
 func (b *NativeBackend) Detect() ([]Display, error) {
-	return discoverLinuxDisplays("/sys/class/drm", "/sys/class/i2c-dev")
+	return discoverLinuxDisplays(b.drmRoot, b.i2cRoot)
 }
 
 func (b *NativeBackend) CurrentInput() (Input, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	originalBus := b.bus
+	input, err := b.currentInput()
+	if err == nil {
+		return input, nil
+	}
+	if rediscoveryErr := b.rediscoverBus(); rediscoveryErr != nil {
+		return 0, fmt.Errorf("%w; automatic monitor bus rediscovery failed: %v", err, rediscoveryErr)
+	}
+	if b.bus == originalBus {
+		return 0, err
+	}
+	input, retryErr := b.currentInput()
+	if retryErr != nil {
+		return 0, fmt.Errorf("read input source failed on configured bus %d and rediscovered bus %d: %w", originalBus, b.bus, retryErr)
+	}
+	return input, nil
+}
+
+func (b *NativeBackend) currentInput() (Input, error) {
 	file, err := b.openBus()
 	if err != nil {
 		return 0, err
@@ -83,6 +116,24 @@ func (b *NativeBackend) SetInput(input Input) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	originalBus := b.bus
+	err := b.setInput(input)
+	if err == nil {
+		return nil
+	}
+	if rediscoveryErr := b.rediscoverBus(); rediscoveryErr != nil {
+		return fmt.Errorf("%w; automatic monitor bus rediscovery failed: %v", err, rediscoveryErr)
+	}
+	if b.bus == originalBus {
+		return err
+	}
+	if retryErr := b.setInput(input); retryErr != nil {
+		return fmt.Errorf("set input source failed on configured bus %d and rediscovered bus %d: %w", originalBus, b.bus, retryErr)
+	}
+	return nil
+}
+
+func (b *NativeBackend) setInput(input Input) error {
 	file, err := b.openBus()
 	if err != nil {
 		return err
@@ -100,6 +151,25 @@ func (b *NativeBackend) SupportedInputs() ([]Input, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	originalBus := b.bus
+	inputs, err := b.supportedInputs()
+	if err == nil {
+		return inputs, nil
+	}
+	if rediscoveryErr := b.rediscoverBus(); rediscoveryErr != nil {
+		return nil, fmt.Errorf("%w; automatic monitor bus rediscovery failed: %v", err, rediscoveryErr)
+	}
+	if b.bus == originalBus {
+		return nil, err
+	}
+	inputs, retryErr := b.supportedInputs()
+	if retryErr != nil {
+		return nil, fmt.Errorf("read input capabilities failed on configured bus %d and rediscovered bus %d: %w", originalBus, b.bus, retryErr)
+	}
+	return inputs, nil
+}
+
+func (b *NativeBackend) supportedInputs() ([]Input, error) {
 	file, err := b.openBus()
 	if err != nil {
 		return nil, err
@@ -152,6 +222,56 @@ func (b *NativeBackend) SupportedInputs() ([]Input, error) {
 	return inputs, nil
 }
 
+func (b *NativeBackend) captureDisplayIdentity() {
+	if b.bus < 0 {
+		return
+	}
+	for _, candidate := range discoverLinuxDisplayCandidates(b.drmRoot) {
+		if candidate.ID == strconv.Itoa(b.bus) {
+			b.displayIdentity = candidate.identity
+			return
+		}
+	}
+}
+
+// rediscoverBus refreshes the volatile Linux I2C adapter number after a DRM
+// hotplug. DisplayPort MST commonly destroys and recreates its connector-owned
+// AUX adapter, so a bus number that was valid when Monux started can later
+// point at a dead transport. Prefer an EDID-identical display and only fall
+// back to an unambiguous single connected display.
+func (b *NativeBackend) rediscoverBus() error {
+	candidates := discoverLinuxDisplayCandidates(b.drmRoot)
+	if len(candidates) == 0 {
+		return errors.New("no connected DRM display with an I2C adapter")
+	}
+
+	matches := candidates
+	if b.displayIdentity != "" {
+		matches = nil
+		for _, candidate := range candidates {
+			if candidate.identity == b.displayIdentity {
+				matches = append(matches, candidate)
+			}
+		}
+		if len(matches) == 0 {
+			return errors.New("configured monitor is not among the connected DRM displays")
+		}
+	}
+	if len(matches) != 1 {
+		return fmt.Errorf("monitor I2C bus changed, but %d candidate displays matched; rerun monux init --monitor <id>", len(matches))
+	}
+
+	bus, err := strconv.Atoi(matches[0].ID)
+	if err != nil {
+		return fmt.Errorf("invalid rediscovered I2C bus %q: %w", matches[0].ID, err)
+	}
+	b.bus = bus
+	if b.displayIdentity == "" {
+		b.displayIdentity = matches[0].identity
+	}
+	return nil
+}
+
 func (b *NativeBackend) openBus() (*os.File, error) {
 	if b.bus < 0 {
 		return nil, errors.New("monitor.id is required; run monux detect and configure its I2C bus number")
@@ -178,29 +298,12 @@ func (b *NativeBackend) openBus() (*os.File, error) {
 }
 
 func discoverLinuxDisplays(drmRoot, i2cRoot string) ([]Display, error) {
-	connectors, err := filepath.Glob(filepath.Join(drmRoot, "card*-*"))
-	if err != nil {
-		return nil, err
-	}
-	displays := make([]Display, 0, len(connectors))
+	candidates := discoverLinuxDisplayCandidates(drmRoot)
+	displays := make([]Display, 0, len(candidates))
 	seen := make(map[string]bool)
-	for _, connectorDir := range connectors {
-		status, err := os.ReadFile(filepath.Join(connectorDir, "status"))
-		if err == nil && strings.TrimSpace(string(status)) != "connected" {
-			continue
-		}
-		id, ok := linuxI2CBusForConnector(connectorDir)
-		if !ok || seen[id] {
-			continue
-		}
-		seen[id] = true
-		name := filepath.Base(connectorDir)
-		if edid, err := os.ReadFile(filepath.Join(connectorDir, "edid")); err == nil {
-			if model := monitorNameFromEDID(edid); model != "" {
-				name += " (" + model + ")"
-			}
-		}
-		displays = append(displays, Display{ID: id, Name: name})
+	for _, candidate := range candidates {
+		displays = append(displays, candidate.Display)
+		seen[candidate.ID] = true
 	}
 
 	if len(displays) == 0 {
@@ -221,6 +324,49 @@ func discoverLinuxDisplays(drmRoot, i2cRoot string) ([]Display, error) {
 		return left < right
 	})
 	return displays, nil
+}
+
+type linuxDisplayCandidate struct {
+	Display
+	identity string
+}
+
+func discoverLinuxDisplayCandidates(drmRoot string) []linuxDisplayCandidate {
+	connectors, err := filepath.Glob(filepath.Join(drmRoot, "card*-*"))
+	if err != nil {
+		return nil
+	}
+	displays := make([]linuxDisplayCandidate, 0, len(connectors))
+	seen := make(map[string]bool)
+	for _, connectorDir := range connectors {
+		status, err := os.ReadFile(filepath.Join(connectorDir, "status"))
+		if err == nil && strings.TrimSpace(string(status)) != "connected" {
+			continue
+		}
+		id, ok := linuxI2CBusForConnector(connectorDir)
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		name := filepath.Base(connectorDir)
+		identity := ""
+		if edid, err := os.ReadFile(filepath.Join(connectorDir, "edid")); err == nil {
+			identity = string(edid)
+			if model := monitorNameFromEDID(edid); model != "" {
+				name += " (" + model + ")"
+			}
+		}
+		displays = append(displays, linuxDisplayCandidate{
+			Display:  Display{ID: id, Name: name},
+			identity: identity,
+		})
+	}
+	sort.Slice(displays, func(i, j int) bool {
+		left, _ := strconv.Atoi(displays[i].ID)
+		right, _ := strconv.Atoi(displays[j].ID)
+		return left < right
+	})
+	return displays
 }
 
 func linuxI2CBusForConnector(connectorDir string) (string, bool) {

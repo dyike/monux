@@ -5,6 +5,7 @@ package monitor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,4 +83,101 @@ func TestNewNativeBackendRejectsInvalidID(t *testing.T) {
 	if _, err := NewNativeBackend("not-a-bus"); err == nil {
 		t.Fatal("NewNativeBackend() error = nil")
 	}
+}
+
+func TestNativeBackendRediscoversChangedBusByEDID(t *testing.T) {
+	root := t.TempDir()
+	drmRoot := filepath.Join(root, "drm")
+	i2cRoot := filepath.Join(root, "i2c-dev")
+	targetEDID := testEDID("DELL P2415Q", 1)
+	otherEDID := testEDID("OTHER", 2)
+	oldConnector := createLinuxConnector(t, drmRoot, "card0-DP-12", "23", targetEDID, true)
+	createLinuxConnector(t, drmRoot, "card0-HDMI-A-1", "7", otherEDID, true)
+
+	backend, err := newNativeBackend("23", drmRoot, i2cRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.displayIdentity == "" {
+		t.Fatal("newNativeBackend() did not capture the configured display identity")
+	}
+
+	if err := os.WriteFile(filepath.Join(oldConnector, "status"), []byte("disconnected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	createLinuxConnector(t, drmRoot, "card0-DP-1", "0", targetEDID, true)
+
+	if err := backend.rediscoverBus(); err != nil {
+		t.Fatalf("rediscoverBus() error = %v", err)
+	}
+	if backend.bus != 0 {
+		t.Fatalf("rediscoverBus() bus = %d, want 0", backend.bus)
+	}
+}
+
+func TestNativeBackendRediscoversOnlyConnectedDisplayWithoutIdentity(t *testing.T) {
+	root := t.TempDir()
+	drmRoot := filepath.Join(root, "drm")
+	backend, err := newNativeBackend("23", drmRoot, filepath.Join(root, "i2c-dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	createLinuxConnector(t, drmRoot, "card0-DP-1", "0", testEDID("DELL P2415Q", 1), true)
+
+	if err := backend.rediscoverBus(); err != nil {
+		t.Fatalf("rediscoverBus() error = %v", err)
+	}
+	if backend.bus != 0 {
+		t.Fatalf("rediscoverBus() bus = %d, want 0", backend.bus)
+	}
+}
+
+func TestNativeBackendDoesNotGuessAmongMultipleDisplays(t *testing.T) {
+	root := t.TempDir()
+	drmRoot := filepath.Join(root, "drm")
+	backend, err := newNativeBackend("23", drmRoot, filepath.Join(root, "i2c-dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	createLinuxConnector(t, drmRoot, "card0-DP-1", "0", nil, true)
+	createLinuxConnector(t, drmRoot, "card0-HDMI-A-1", "7", nil, true)
+
+	err = backend.rediscoverBus()
+	if err == nil || !strings.Contains(err.Error(), "2 candidate displays matched") {
+		t.Fatalf("rediscoverBus() error = %v, want ambiguity error", err)
+	}
+	if backend.bus != 23 {
+		t.Fatalf("rediscoverBus() changed bus to %d after ambiguity", backend.bus)
+	}
+}
+
+func createLinuxConnector(t *testing.T, drmRoot, name, bus string, edid []byte, connected bool) string {
+	t.Helper()
+	connector := filepath.Join(drmRoot, name)
+	if err := os.MkdirAll(filepath.Join(connector, "i2c-"+bus, "i2c-dev", "i2c-"+bus), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	status := "disconnected\n"
+	if connected {
+		status = "connected\n"
+	}
+	if err := os.WriteFile(filepath.Join(connector, "status"), []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if edid != nil {
+		if err := os.WriteFile(filepath.Join(connector, "edid"), edid, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return connector
+}
+
+func testEDID(name string, marker byte) []byte {
+	edid := make([]byte, 128)
+	edid[8] = marker
+	descriptor := make([]byte, 18)
+	copy(descriptor, []byte{0, 0, 0, 0xfc, 0})
+	copy(descriptor[5:], name)
+	copy(edid[54:72], descriptor)
+	return edid
 }
