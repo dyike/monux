@@ -1,5 +1,9 @@
 # Monux Omarchy plugin
 
+If waking Linux makes another display on a connected Mac briefly go black,
+see the optional [keep-display-on workaround](../keep-display-on.md). It keeps
+the Linux display output on during lock and includes a restore command.
+
 This manifest-backed Omarchy bar widget calls the local `monux` CLI. Its
 native-style popup follows the same `Panel` / `KeyboardPanel` interaction model
 as Omarchy's built-in Display widget.
